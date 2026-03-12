@@ -153,24 +153,21 @@ function syncThemePickers(dbTheme) {
 // Supabase Data Operations
 // ============================================================
 async function loadState() {
-  let settingsRes = { data: null, error: null };
-  try {
-    settingsRes = await db.from('game_settings').select('win_mode, custom_pattern').eq('id', 1).single();
-  } catch(e) {
-    console.warn('game_settings table not found, using classic mode');
-  }
-  const [numbersRes, themeRes, playersRes, winnersRes, resetRes] = await Promise.all([
+  const [numbersRes, themeRes, playersRes, winnersRes, resetRes, settingsRes] = await Promise.all([
     db.from('called_numbers').select('number').order('created_at'),
     db.from('theme').select('*').eq('id', 1).single(),
     db.from('players').select('name, stamps').order('created_at'),
     db.from('winners').select('name').order('created_at'),
     db.from('stamp_resets').select('version').eq('id', 1).single(),
+    db.from('game_settings').select('win_mode, custom_pattern').eq('id', 1).single()
+      .catch(() => ({ data: null, error: new Error('game_settings unavailable') })),
   ]);
   if (numbersRes.error) console.error('loadState: called_numbers error', numbersRes.error);
   if (themeRes.error) console.error('loadState: theme error', themeRes.error);
   if (playersRes.error) console.error('loadState: players error', playersRes.error);
   if (winnersRes.error) console.error('loadState: winners error', winnersRes.error);
   if (resetRes.error) console.error('loadState: stamp_resets error', resetRes.error);
+  if (settingsRes.error) console.warn('loadState: game_settings not available, using defaults');
   return {
     calledNumbers: (numbersRes.data || []).map(r => r.number),
     theme: themeRes.data || null,
@@ -802,7 +799,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const name = raw.trim();
 
     if (name.toLowerCase() === ADMIN_NAME) {
-      localStorage.setItem(NAME_KEY, name);
       showAdminModal();
     } else {
       showNameConfirmModal(name);
@@ -842,6 +838,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     errorEl.hidden = true;
+    localStorage.setItem(NAME_KEY, ADMIN_NAME);
     localStorage.setItem(ADMIN_AUTH_KEY, '1');
     await showAdminView();
   });
@@ -951,25 +948,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  if (savedName.toLowerCase() === ADMIN_NAME) {
-    const isAuthed = localStorage.getItem(ADMIN_AUTH_KEY);
-    if (isAuthed) {
-      await showAdminView();
+  try {
+    if (savedName.toLowerCase() === ADMIN_NAME) {
+      const isAuthed = localStorage.getItem(ADMIN_AUTH_KEY);
+      if (isAuthed) {
+        await showAdminView();
+      } else {
+        hideAll();
+        document.getElementById('admin-modal').hidden = false;
+      }
     } else {
-      hideAll();
-      document.getElementById('admin-modal').hidden = false;
+      // Check if the player still exists in Supabase (may have been deleted by admin)
+      const exists = await checkPlayerExists(savedName.toLowerCase().trim());
+      if (!exists) {
+        // Player was deleted — clear their local data and show the account-deleted modal
+        localStorage.removeItem(NAME_KEY);
+        localStorage.removeItem(stampKey(savedName));
+        hideAll();
+        document.getElementById('account-deleted-modal').hidden = false;
+      } else {
+        await showPlayerView(savedName);
+      }
     }
-  } else {
-    // Check if the player still exists in Supabase (may have been deleted by admin)
-    const exists = await checkPlayerExists(savedName.toLowerCase().trim());
-    if (!exists) {
-      // Player was deleted — clear their local data and show the account-deleted modal
-      localStorage.removeItem(NAME_KEY);
-      localStorage.removeItem(stampKey(savedName));
-      hideAll();
-      document.getElementById('account-deleted-modal').hidden = false;
-    } else {
-      await showPlayerView(savedName);
-    }
+  } catch (err) {
+    console.error('Initialization error:', err);
+    hideAll();
+    document.getElementById('name-modal').hidden = false;
   }
 });
