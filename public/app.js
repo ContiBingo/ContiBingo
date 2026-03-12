@@ -599,6 +599,27 @@ function updateWinModeDisplay() {
     custom: '🖊️ Custom Pattern',
   };
   el.textContent = labels[winMode] || labels.classic;
+
+  const preview = document.getElementById('win-pattern-preview');
+  if (!preview) return;
+  if (winMode !== 'custom') {
+    preview.hidden = true;
+    return;
+  }
+  preview.hidden = false;
+  preview.innerHTML = '';
+  for (let i = 0; i < 25; i++) {
+    const cell = document.createElement('div');
+    const isFree = (i === 12);
+    cell.className = 'pattern-preview-cell';
+    if (isFree) {
+      cell.classList.add('pattern-preview-free');
+      cell.textContent = '★';
+    } else if (customPattern[i]) {
+      cell.classList.add('pattern-preview-active');
+    }
+    preview.appendChild(cell);
+  }
 }
 
 function getWinPatternCells() {
