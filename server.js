@@ -14,7 +14,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const DATA_FILE = path.join(__dirname, 'data', 'state.json');
-const ADMIN_PASSWORD = 'Pizza111';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Pizza111';
 
 const DEFAULT_STATE = {
   calledNumbers: [],
