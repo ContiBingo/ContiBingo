@@ -21,6 +21,10 @@ let isAdminView = false;
 let calledNumbers = [];
 let currentStampResetVersion = 0;
 
+let adminPlayers = [];
+let adminWinners = [];
+let adminCalledNumbers = [];
+
 // ============================================================
 // Utilities
 // ============================================================
@@ -149,6 +153,11 @@ async function loadState() {
     db.from('winners').select('name').order('created_at'),
     db.from('stamp_resets').select('version').eq('id', 1).single(),
   ]);
+  if (numbersRes.error) console.error('loadState: called_numbers error', numbersRes.error);
+  if (themeRes.error) console.error('loadState: theme error', themeRes.error);
+  if (playersRes.error) console.error('loadState: players error', playersRes.error);
+  if (winnersRes.error) console.error('loadState: winners error', winnersRes.error);
+  if (resetRes.error) console.error('loadState: stamp_resets error', resetRes.error);
   return {
     calledNumbers: (numbersRes.data || []).map(r => r.number),
     theme: themeRes.data || null,
@@ -361,13 +370,16 @@ async function showAdminView() {
 
   const state = await loadState();
   calledNumbers = state.calledNumbers;
+  adminPlayers = state.players;
+  adminWinners = state.winners;
+  adminCalledNumbers = state.calledNumbers;
   if (state.theme) {
     applyThemeFromDB(state.theme);
     syncThemePickers(state.theme);
   }
   updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
   renderWinners(state.winners);
-  renderPlayerList(state.players, state.winners, calledNumbers);
+  renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
 
   subscribeToRealtimeAdmin();
 }
@@ -382,8 +394,19 @@ function renderPlayerList(players, winners, nums) {
   const filter = (document.getElementById('player-search').value || '').toLowerCase();
   const filtered = players.filter(p => p.name.toLowerCase().includes(filter));
   list.innerHTML = '';
+
+  const countEl = document.createElement('p');
+  countEl.style.cssText = 'font-size:0.8rem;opacity:0.6;margin-bottom:0.5rem;';
+  countEl.textContent = filter
+    ? `Showing ${filtered.length} of ${players.length} player${players.length !== 1 ? 's' : ''}`
+    : `${players.length} player${players.length !== 1 ? 's' : ''} registered`;
+  if (players.length > 0) list.appendChild(countEl);
+
   if (filtered.length === 0) {
-    list.innerHTML = '<p style="opacity:0.5;font-size:0.9rem;">No players yet.</p>';
+    const empty = document.createElement('p');
+    empty.style.cssText = 'opacity:0.5;font-size:0.9rem;';
+    empty.textContent = players.length === 0 ? 'No players yet.' : 'No players match your search.';
+    list.appendChild(empty);
     return;
   }
   filtered.forEach(p => {
@@ -397,8 +420,11 @@ function renderPlayerList(players, winners, nums) {
 
 async function refreshPlayerMonitor() {
   const state = await loadState();
-  renderPlayerList(state.players, state.winners, state.calledNumbers);
-  renderWinners(state.winners);
+  adminPlayers = state.players;
+  adminWinners = state.winners;
+  adminCalledNumbers = state.calledNumbers;
+  renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+  renderWinners(adminWinners);
 }
 
 function renderWinners(winners) {
@@ -642,7 +668,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Player search
-  document.getElementById('player-search').addEventListener('input', async () => {
+  document.getElementById('player-search').addEventListener('input', () => {
+    renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+  });
+
+  // Refresh players button
+  document.getElementById('refresh-players-btn').addEventListener('click', async () => {
     await refreshPlayerMonitor();
   });
 

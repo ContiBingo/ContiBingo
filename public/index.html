@@ -126,7 +126,10 @@
       <!-- Section C: Player Monitor -->
       <section class="admin-section admin-section-wide">
         <h2 class="section-title">👥 Player Monitor</h2>
-        <input type="text" id="player-search" class="modal-input" placeholder="Search players..." />
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <input type="text" id="player-search" class="modal-input" placeholder="Search players..." style="flex:1;" />
+          <button class="btn btn-secondary btn-sm" id="refresh-players-btn">🔄 Refresh</button>
+        </div>
         <div id="player-list" class="player-list"></div>
       </section>
 
