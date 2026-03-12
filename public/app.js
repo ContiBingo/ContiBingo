@@ -220,11 +220,10 @@ async function adminSetTheme(theme) {
 }
 
 async function adminSaveWinMode(mode, pattern) {
-  await db.from('game_settings').upsert({
-    id: 1,
+  await db.from('game_settings').update({
     win_mode: mode,
     custom_pattern: pattern,
-  }, { onConflict: 'id' });
+  }).eq('id', 1);
 }
 
 // ============================================================
@@ -298,6 +297,7 @@ function renderCard(container, card, stamps, calledNums, clickable) {
         if (stamped.has(num)) cell.classList.add('stamped');
         if (called.has(num)) {
           cell.classList.add('callable');
+          if (!stamped.has(num)) cell.classList.add('called-highlight');
           if (clickable) {
             cell.addEventListener('click', () => onCellClick(num, card));
           }
@@ -361,6 +361,8 @@ function hideAll() {
 
 function showNameModal() {
   hideAll();
+  document.getElementById('name-entry-step').hidden = false;
+  document.getElementById('name-confirm-step').hidden = true;
   document.getElementById('name-modal').hidden = false;
 }
 
@@ -426,6 +428,41 @@ async function showAdminView() {
   subscribeToRealtimeAdmin();
 }
 
+function renderMiniCard(name, stamps, calledNums) {
+  const card = generateCard(name);
+  const stamped = new Set(stamps);
+  const called = new Set(calledNums);
+  const grid = document.createElement('div');
+  grid.className = 'player-mini-card';
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const num = card[r][c];
+      const cell = document.createElement('div');
+      cell.className = 'player-mini-cell';
+      const isFree = (num === 0);
+      if (isFree) {
+        cell.classList.add('mini-free', 'mini-stamped');
+        cell.innerHTML = '<span class="mini-cell-num" style="font-size:0.45rem;">★</span>';
+      } else {
+        cell.innerHTML = `<span class="mini-cell-num">${num}</span>`;
+        if (stamped.has(num)) {
+          cell.classList.add('mini-stamped');
+        } else if (called.has(num)) {
+          cell.classList.add('mini-called');
+        } else {
+          cell.classList.add('mini-uncalled');
+        }
+      }
+      grid.appendChild(cell);
+    }
+  }
+  return grid;
+}
+
+async function adminDeletePlayer(nameLower) {
+  await db.from('players').delete().eq('name_lower', nameLower);
+}
+
 // ============================================================
 // Admin — Player Monitor
 // ============================================================
@@ -433,31 +470,50 @@ function renderPlayerList(players, winners, nums) {
   const list = document.getElementById('player-list');
   if (!list) return;
   const winnerSet = new Set((winners || []).map(w => w.toLowerCase()));
-  const filter = (document.getElementById('player-search').value || '').toLowerCase();
-  const filtered = players.filter(p => p.name.toLowerCase().includes(filter));
   list.innerHTML = '';
 
   const countEl = document.createElement('p');
   countEl.style.cssText = 'font-size:0.8rem;opacity:0.6;margin-bottom:0.5rem;';
-  countEl.textContent = filter
-    ? `Showing ${filtered.length} of ${players.length} player${players.length !== 1 ? 's' : ''}`
-    : `${players.length} player${players.length !== 1 ? 's' : ''} registered`;
+  countEl.textContent = `${players.length} player${players.length !== 1 ? 's' : ''} registered`;
   if (players.length > 0) list.appendChild(countEl);
 
-  if (filtered.length === 0) {
+  if (players.length === 0) {
     const empty = document.createElement('p');
     empty.style.cssText = 'opacity:0.5;font-size:0.9rem;';
-    empty.textContent = players.length === 0 ? 'No players yet.' : 'No players match your search.';
+    empty.textContent = 'No players yet.';
     list.appendChild(empty);
     return;
   }
-  filtered.forEach(p => {
+  players.forEach(p => {
     const isWinner = winnerSet.has(p.name.toLowerCase());
     const item = document.createElement('div');
     item.className = 'player-item' + (isWinner ? ' bingo-winner' : '');
+
     const initials = p.name.split(' ').slice(0,2).map(w => w.charAt(0)).join('').toUpperCase();
-    item.innerHTML = `<span class="player-avatar">${initials}</span><span class="player-name">${(isWinner ? '🏆 ' : '') + p.name}</span>`;
-    item.addEventListener('click', () => showPlayerCardModal(p.name, p.stamps || [], nums));
+
+    // Header row (avatar + name + delete button)
+    const header = document.createElement('div');
+    header.className = 'player-item-header';
+    header.innerHTML = `<span class="player-avatar">${initials}</span><span class="player-name">${(isWinner ? '🏆 ' : '') + p.name}</span>`;
+    header.addEventListener('click', () => showPlayerCardModal(p.name, p.stamps || [], nums));
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'player-delete-btn';
+    delBtn.textContent = '🗑️ Delete';
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete card for ${p.name}? They will be sent back to the login screen.`)) return;
+      const nameLower = p.name.toLowerCase().trim();
+      await adminDeletePlayer(nameLower);
+      adminPlayers = adminPlayers.filter(pl => pl.name.toLowerCase().trim() !== nameLower);
+      renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+    });
+    header.appendChild(delBtn);
+    item.appendChild(header);
+
+    // Mini card preview
+    item.appendChild(renderMiniCard(p.name, p.stamps || [], nums || []));
+
     list.appendChild(item);
   });
 }
@@ -686,10 +742,21 @@ function subscribeToRealtime(card) {
     .subscribe();
 
   db.channel('game_settings_ch')
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_settings' }, (payload) => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_settings' }, (payload) => {
       winMode = payload.new.win_mode || 'classic';
       customPattern = payload.new.custom_pattern || Array(25).fill(false);
       updateWinModeDisplay();
+    })
+    .subscribe();
+
+  db.channel('player_deleted_ch')
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'players' }, (payload) => {
+      if (!playerName) return;
+      if (payload.old && payload.old.name_lower === playerName.toLowerCase().trim()) {
+        localStorage.removeItem(NAME_KEY);
+        clearLocalStamps();
+        showNameModal();
+      }
     })
     .subscribe();
 }
@@ -724,7 +791,7 @@ function subscribeToRealtimeAdmin() {
     .subscribe();
 
   db.channel('game_settings_admin_ch')
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_settings' }, (payload) => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_settings' }, (payload) => {
       winMode = payload.new.win_mode || 'classic';
       customPattern = payload.new.custom_pattern || Array(25).fill(false);
     })
@@ -739,6 +806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('loading-overlay').hidden = false;
 
   // Name form
+  let pendingName = null;
   document.getElementById('name-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const raw = document.getElementById('name-input').value.trim();
@@ -752,14 +820,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const name = raw.trim();
-    localStorage.setItem(NAME_KEY, name);
+    pendingName = raw.trim();
+    document.getElementById('confirm-name-text').textContent = pendingName;
+    document.getElementById('name-entry-step').hidden = true;
+    document.getElementById('name-confirm-step').hidden = false;
+  });
 
+  document.getElementById('confirm-name-yes-btn').addEventListener('click', async () => {
+    if (!pendingName) return;
+    const name = pendingName;
+    pendingName = null;
+    localStorage.setItem(NAME_KEY, name);
     if (name.toLowerCase() === ADMIN_NAME) {
       showAdminModal();
     } else {
       await showPlayerView(name);
     }
+  });
+
+  document.getElementById('confirm-name-back-btn').addEventListener('click', () => {
+    pendingName = null;
+    document.getElementById('name-confirm-step').hidden = true;
+    document.getElementById('name-entry-step').hidden = false;
   });
 
   // Admin password form
@@ -851,11 +933,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('reset-stamps-btn').addEventListener('click', async () => {
     if (!confirm('Reset ALL player stamps? This cannot be undone.')) return;
     await adminResetStamps();
-  });
-
-  // Player search
-  document.getElementById('player-search').addEventListener('input', () => {
-    renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
   });
 
   // Refresh players button
