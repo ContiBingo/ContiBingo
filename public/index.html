@@ -20,11 +20,20 @@
     <div class="modal-box">
       <h1 class="modal-title">🎱 Welcome to ContiBingo</h1>
       <p class="modal-subtitle">Enter your full name to get your unique bingo card</p>
-      <form id="name-form">
-        <input type="text" id="name-input" class="modal-input" placeholder="First and Last Name" autocomplete="name" required />
-        <div id="name-error" class="error-msg" hidden></div>
-        <button type="submit" class="btn btn-primary btn-full">Play ContiBingo</button>
-      </form>
+      <div id="name-entry-step">
+        <form id="name-form">
+          <input type="text" id="name-input" class="modal-input" placeholder="First and Last Name" autocomplete="name" required />
+          <div id="name-error" class="error-msg" hidden></div>
+          <button type="submit" class="btn btn-primary btn-full">Play ContiBingo</button>
+        </form>
+      </div>
+      <div id="name-confirm-step" hidden>
+        <p class="modal-subtitle" style="margin-bottom:0.5rem;">Is this your name?</p>
+        <div class="confirm-name-display" id="confirm-name-text"></div>
+        <p class="confirm-warning">⚠️ Once you generate your card, your name cannot be changed.</p>
+        <button id="confirm-name-yes-btn" class="btn btn-primary btn-full">✓ Yes, Generate My Card</button>
+        <button id="confirm-name-back-btn" class="btn btn-secondary btn-full" style="margin-top:0.5rem;">← Change Name</button>
+      </div>
     </div>
   </div>
 
@@ -130,10 +139,7 @@
       <!-- Section C: Player Monitor -->
       <section class="admin-section admin-section-wide">
         <h2 class="section-title">👥 Player Monitor</h2>
-        <div class="search-row">
-          <input type="text" id="player-search" class="modal-input" placeholder="🔍 Search players..." />
-          <button class="btn btn-secondary btn-sm" id="refresh-players-btn">🔄 Refresh</button>
-        </div>
+        <button class="btn btn-secondary btn-sm" id="refresh-players-btn" style="margin-bottom:0.75rem;">🔄 Refresh</button>
         <div id="player-list" class="player-list"></div>
       </section>
 
