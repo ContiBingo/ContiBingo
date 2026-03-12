@@ -1,77 +1,104 @@
-# ContiBingo 🎱
+# 🎱 ContiBingo
 
-A real-time multiplayer bingo web application where each player gets a unique, deterministic bingo card generated from their name.
+ContiBingo is a real-time multiplayer bingo app powered by **Supabase** (database + realtime). It's a 100% static frontend app that can be hosted on **GitHub Pages** — no server required.
 
-## Features
+Each player gets a unique, deterministic bingo card generated from a seed based on their name. The admin can call numbers, customize the theme, monitor players, and detect winners — all in real time.
 
-- 🎴 **Unique cards** — Each player's card is deterministically generated from their name seed
-- ⚡ **Real-time sync** — Live number broadcasting via Socket.IO
-- 🎨 **Customizable themes** — Admin can change colors for all players simultaneously
-- 📊 **Player monitoring** — Admin can view any player's card and stamp progress
-- 🏆 **Automatic win detection** — Bingo detected across all 12 lines (5 rows + 5 cols + 2 diagonals)
-- 📱 **Mobile-friendly** — Responsive design that works on any device
-- 💾 **Persistent state** — Game state survives server restarts
+---
 
-## Getting Started
+## 🚀 Live App
 
-### Prerequisites
+Once deployed, your app will be available at:
 
-- Node.js 16+
-- npm
+```
+https://<your-org>.github.io/ContiBingo
+```
 
-### Installation
+---
+
+## 🛠️ One-Time Supabase Setup
+
+### 1. Create a Supabase project
+
+1. Go to [supabase.com](https://supabase.com) and create a free account
+2. Create a new project
+3. Copy your **Project URL** and **anon/public key** from:
+   - `Project Settings → API`
+
+### 2. Run the database schema
+
+1. In your Supabase project, go to **SQL Editor**
+2. Paste the contents of [`supabase/schema.sql`](supabase/schema.sql)
+3. Click **Run**
+
+This creates all 5 tables (`called_numbers`, `players`, `winners`, `theme`, `stamp_resets`) with RLS policies and realtime enabled.
+
+### 3. Enable Realtime for all tables
+
+In the Supabase dashboard, go to **Database → Replication** and confirm all 5 tables are listed under the `supabase_realtime` publication (the schema.sql handles this, but you can verify there).
+
+---
+
+## 🌐 GitHub Pages Deployment
+
+### 1. Enable GitHub Pages
+
+1. Go to your repo **Settings → Pages**
+2. Under **Source**, select **GitHub Actions**
+
+### 2. Deploy
+
+Push to `main` — the GitHub Actions workflow (`.github/workflows/deploy.yml`) will automatically deploy the `public/` folder to GitHub Pages.
+
+You can also trigger a manual deploy from **Actions → Deploy ContiBingo to GitHub Pages → Run workflow**.
+
+---
+
+## 🔑 Admin Access
+
+- **Name:** `Aidan Carter` (case-insensitive)
+- **Password:** `Pizza111`
+
+Admin credentials are checked client-side and stored in localStorage on that device.
+
+---
+
+## 🃏 How Seed-Based Cards Work
+
+Each player's bingo card is generated deterministically from their name using the [seedrandom](https://github.com/davidbau/seedrandom) library:
+
+- Seed = `playerName.toLowerCase().trim()`
+- Five numbers are picked from each BINGO column range:
+  - **B**: 1–15, **I**: 16–30, **N**: 31–45, **G**: 46–60, **O**: 61–75
+- The center square (row 3, col 3) is always **FREE**
+- The same name always produces the same card — players can verify fairness
+
+---
+
+## 🏗️ Architecture
+
+```
+public/
+  index.html    — Single-page app (all views and modals)
+  app.js        — All frontend logic (Supabase client, realtime, card gen)
+  style.css     — Dark space-themed, mobile-first CSS
+
+supabase/
+  schema.sql    — Database schema (run once in Supabase SQL Editor)
+
+.github/
+  workflows/
+    deploy.yml  — GitHub Pages auto-deploy workflow
+```
+
+No server, no build step, no Node dependencies needed to run the app.
+
+---
+
+## 💻 Local Development
 
 ```bash
-npm install
+npx serve public
 ```
 
-### Running
-
-```bash
-npm start
-```
-
-Then open [http://localhost:3000](http://localhost:3000) in your browser.
-
-## How to Play
-
-1. Visit the app in your browser
-2. Enter your **First and Last Name** — this generates your unique bingo card
-3. Wait for the admin to call numbers
-4. Click a number on your card to stamp it (only callable numbers can be stamped)
-5. Get 5 in a row (horizontal, vertical, or diagonal) to win!
-
-## Admin Access
-
-The admin dashboard is accessible by:
-
-1. Entering the name **Aidan Carter** (case-insensitive)
-2. Entering the admin password: **Pizza111**
-
-### Admin Features
-
-- **Theme Customizer** — Change colors for all players' cards
-- **Number Caller** — Call individual or multiple bingo numbers
-- **Player Monitor** — View all players and their card progress
-- **Winners Panel** — Real-time winner notifications
-- **Reset Stamps** — Clear all player stamps globally
-
-## Tech Stack
-
-- **Backend:** Node.js + Express + Socket.IO
-- **Frontend:** Vanilla HTML/CSS/JavaScript (no build step needed)
-- **Storage:** In-memory + `data/state.json` for persistence, `localStorage` for player stamps
-
-## Project Structure
-
-```
-ContiBingo/
-├── server.js          # Express + Socket.IO backend
-├── package.json
-├── data/
-│   └── state.json     # Persisted game state (auto-created)
-└── public/
-    ├── index.html     # Single-page app
-    ├── style.css      # Dark theme with CSS custom properties
-    └── app.js         # Frontend logic
-```
+Then open `http://localhost:3000`.
