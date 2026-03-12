@@ -56,9 +56,6 @@ You can also trigger a manual deploy from **Actions → Deploy ContiBingo to Git
 
 ## 🔑 Admin Access
 
-- **Name:** `Aidan Carter` (case-insensitive)
-- **Password:** `Pizza111`
-
 Admin credentials are checked client-side and stored in localStorage on that device.
 
 ---
