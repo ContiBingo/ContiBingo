@@ -41,12 +41,6 @@ Then open [http://localhost:3000](http://localhost:3000) in your browser.
 4. Click a number on your card to stamp it (only callable numbers can be stamped)
 5. Get 5 in a row (horizontal, vertical, or diagonal) to win!
 
-## Admin Access
-
-The admin dashboard is accessible by:
-
-1. Entering the name **Aidan Carter** (case-insensitive)
-2. Entering the admin password: **Pizza111**
 
 ### Admin Features
 
