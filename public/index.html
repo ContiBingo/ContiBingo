@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ContiBingo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- Loading Spinner -->
+  <div id="loading-overlay" class="modal-overlay">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- NAME MODAL -->
+  <div id="name-modal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <h1 class="modal-title">🎱 Welcome to ContiBingo</h1>
+      <p class="modal-subtitle">Enter your full name to get your unique bingo card</p>
+      <form id="name-form">
+        <input type="text" id="name-input" class="modal-input" placeholder="First and Last Name" autocomplete="name" required />
+        <div id="name-error" class="error-msg" hidden></div>
+        <button type="submit" class="btn btn-primary btn-full">Play ContiBingo</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADMIN PASSWORD MODAL -->
+  <div id="admin-modal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <h1 class="modal-title">🔐 Admin Access</h1>
+      <p class="modal-subtitle">ContiBingo Admin Dashboard</p>
+      <form id="admin-form">
+        <input type="password" id="admin-password-input" class="modal-input" placeholder="Admin Password" required />
+        <div id="admin-error" class="error-msg" hidden>Incorrect password. Try again.</div>
+        <div class="btn-row">
+          <button type="button" id="admin-back-btn" class="btn btn-secondary">← Back</button>
+          <button type="submit" class="btn btn-primary">Login</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- WIN OVERLAY -->
+  <div id="win-overlay" class="winner-overlay" hidden>
+    <div class="winner-content">
+      <div class="winner-emoji">🏆</div>
+      <h1 class="winner-title">BINGO!</h1>
+      <p class="winner-subtitle" id="win-player-name"></p>
+      <button class="btn btn-primary" onclick="document.getElementById('win-overlay').hidden=true">Continue Playing</button>
+    </div>
+  </div>
+
+  <!-- PLAYER VIEW -->
+  <div id="player-view" hidden>
+    <header class="app-header">
+      <div class="header-logo">🎱 ContiBingo</div>
+      <div class="header-player" id="header-player-name"></div>
+    </header>
+
+    <main class="player-main">
+      <div class="player-card-section">
+        <div class="card-header">
+          <h2 id="card-player-name"></h2>
+          <div class="bingo-header-row">
+            <span class="bingo-letter b">B</span>
+            <span class="bingo-letter i">I</span>
+            <span class="bingo-letter n">N</span>
+            <span class="bingo-letter g">G</span>
+            <span class="bingo-letter o">O</span>
+          </div>
+        </div>
+        <div id="bingo-card" class="bingo-card"></div>
+      </div>
+
+      <div class="called-numbers-section">
+        <h3 class="section-title">Numbers Called</h3>
+        <div id="called-numbers-display" class="called-numbers-grid"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ADMIN VIEW -->
+  <div id="admin-view" hidden>
+    <header class="app-header admin-header">
+      <div class="header-logo">🎱 ContiBingo</div>
+      <div class="header-admin-badge">Admin Dashboard</div>
+      <button class="btn btn-danger btn-sm" id="admin-logout-btn">Logout</button>
+    </header>
+
+    <main class="admin-main">
+
+      <!-- Section A: Theme Customizer -->
+      <section class="admin-section">
+        <h2 class="section-title">🎨 Theme Customizer</h2>
+        <div class="theme-grid">
+          <label class="color-label">Background<input type="color" id="theme-bg" value="#1a1a2e" /></label>
+          <label class="color-label">Card<input type="color" id="theme-card" value="#16213e" /></label>
+          <label class="color-label">Stamp<input type="color" id="theme-stamp" value="#e94560" /></label>
+          <label class="color-label">Header<input type="color" id="theme-header" value="#0f3460" /></label>
+          <label class="color-label">Text<input type="color" id="theme-text" value="#ffffff" /></label>
+          <label class="color-label">Accent<input type="color" id="theme-accent" value="#e94560" /></label>
+        </div>
+        <button class="btn btn-primary" id="apply-theme-btn">Apply Theme</button>
+      </section>
+
+      <!-- Section B: Number Caller -->
+      <section class="admin-section">
+        <h2 class="section-title">📣 Number Caller</h2>
+        <div class="number-caller-controls">
+          <div class="input-row">
+            <input type="number" id="single-number-input" class="modal-input" placeholder="Enter number (1-75)" min="1" max="75" />
+            <button class="btn btn-primary" id="call-number-btn">Call Number</button>
+          </div>
+          <div class="input-row">
+            <textarea id="multi-number-input" class="modal-input" placeholder="Multiple numbers (comma or space separated, e.g. 5 12 33)" rows="2"></textarea>
+            <button class="btn btn-accent" id="call-multi-btn">Call Multiple</button>
+          </div>
+          <button class="btn btn-danger" id="clear-numbers-btn">Clear All Numbers</button>
+        </div>
+        <h3 class="section-subtitle">Called Numbers</h3>
+        <div id="admin-called-numbers" class="called-numbers-grid"></div>
+      </section>
+
+      <!-- Section C: Player Monitor -->
+      <section class="admin-section admin-section-wide">
+        <h2 class="section-title">👥 Player Monitor</h2>
+        <input type="text" id="player-search" class="modal-input" placeholder="Search players..." />
+        <div id="player-list" class="player-list"></div>
+      </section>
+
+      <!-- Section D: Winners -->
+      <section class="admin-section">
+        <h2 class="section-title">🏆 Winners</h2>
+        <div id="admin-winners" class="winners-list"></div>
+      </section>
+
+      <!-- Reset Stamps -->
+      <section class="admin-section">
+        <h2 class="section-title">🔄 Reset Stamps</h2>
+        <p class="section-desc">This will clear all player stamps globally. Players will need to re-stamp their numbers.</p>
+        <button class="btn btn-danger btn-large" id="reset-stamps-btn">Reset All Player Stamps</button>
+      </section>
+
+    </main>
+
+    <!-- Player Card Modal (admin view) -->
+    <div id="player-card-modal" class="modal-overlay" hidden>
+      <div class="modal-box modal-large">
+        <button class="modal-close-btn" id="close-player-modal">✕</button>
+        <h2 id="modal-player-name-title"></h2>
+        <div class="bingo-header-row">
+          <span class="bingo-letter b">B</span>
+          <span class="bingo-letter i">I</span>
+          <span class="bingo-letter n">N</span>
+          <span class="bingo-letter g">G</span>
+          <span class="bingo-letter o">O</span>
+        </div>
+        <div id="modal-bingo-card" class="bingo-card"></div>
+        <div id="modal-player-stats" class="player-stats"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
