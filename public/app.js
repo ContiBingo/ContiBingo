@@ -15,7 +15,6 @@ const ADMIN_PASSWORD = 'Pizza111';
 const NAME_KEY = 'contibingo_name';
 const ADMIN_AUTH_KEY = 'contibingo_admin_auth';
 const STAMP_RESET_VERSION_KEY = 'contibingo_stamp_reset_version';
-const DELETED_PLAYERS_KEY = 'contibingo_deleted_players';
 
 let playerName = null;
 let isAdminView = false;
@@ -28,9 +27,6 @@ let adminCalledNumbers = [];
 
 let winMode = 'classic';
 let customPattern = Array(25).fill(false);
-
-let pendingConfirmName = null;
-let modalDeleteHandler = null;
 
 // ============================================================
 // Utilities
@@ -153,21 +149,24 @@ function syncThemePickers(dbTheme) {
 // Supabase Data Operations
 // ============================================================
 async function loadState() {
-  const [numbersRes, themeRes, playersRes, winnersRes, resetRes, settingsRes] = await Promise.all([
+  let settingsRes = { data: null, error: null };
+  try {
+    settingsRes = await db.from('game_settings').select('win_mode, custom_pattern').eq('id', 1).single();
+  } catch(e) {
+    console.warn('game_settings table not found, using classic mode');
+  }
+  const [numbersRes, themeRes, playersRes, winnersRes, resetRes] = await Promise.all([
     db.from('called_numbers').select('number').order('created_at'),
     db.from('theme').select('*').eq('id', 1).single(),
     db.from('players').select('name, stamps').order('created_at'),
     db.from('winners').select('name').order('created_at'),
     db.from('stamp_resets').select('version').eq('id', 1).single(),
-    db.from('game_settings').select('win_mode, custom_pattern').eq('id', 1).single()
-      .catch(() => ({ data: null, error: new Error('game_settings unavailable') })),
   ]);
   if (numbersRes.error) console.error('loadState: called_numbers error', numbersRes.error);
   if (themeRes.error) console.error('loadState: theme error', themeRes.error);
   if (playersRes.error) console.error('loadState: players error', playersRes.error);
   if (winnersRes.error) console.error('loadState: winners error', winnersRes.error);
   if (resetRes.error) console.error('loadState: stamp_resets error', resetRes.error);
-  if (settingsRes.error) console.warn('loadState: game_settings not available, using defaults');
   return {
     calledNumbers: (numbersRes.data || []).map(r => r.number),
     theme: themeRes.data || null,
@@ -226,20 +225,6 @@ async function adminSaveWinMode(mode, pattern) {
     win_mode: mode,
     custom_pattern: pattern,
   }, { onConflict: 'id' });
-}
-
-async function adminDeletePlayer(nameLower, name) {
-  const { error: playerErr } = await db.from('players').delete().eq('name_lower', nameLower);
-  if (playerErr) console.error('adminDeletePlayer: players error', playerErr);
-  const { error: winnerErr } = await db.from('winners').delete().eq('name', name);
-  if (winnerErr) console.error('adminDeletePlayer: winners error', winnerErr);
-  return playerErr || winnerErr || null;
-}
-
-async function checkPlayerExists(nameLower) {
-  const { data, error } = await db.from('players').select('name_lower').eq('name_lower', nameLower).maybeSingle();
-  if (error) console.error('checkPlayerExists error', error);
-  return !!data;
 }
 
 // ============================================================
@@ -369,8 +354,6 @@ function updateCalledNumbersDisplay(nums, containerId) {
 function hideAll() {
   document.getElementById('loading-overlay').hidden = true;
   document.getElementById('name-modal').hidden = true;
-  document.getElementById('name-confirm-modal').hidden = true;
-  document.getElementById('account-deleted-modal').hidden = true;
   document.getElementById('admin-modal').hidden = true;
   document.getElementById('player-view').hidden = true;
   document.getElementById('admin-view').hidden = true;
@@ -384,13 +367,6 @@ function showNameModal() {
 function showAdminModal() {
   hideAll();
   document.getElementById('admin-modal').hidden = false;
-}
-
-function showNameConfirmModal(name) {
-  pendingConfirmName = name;
-  hideAll();
-  document.getElementById('confirm-name-display').textContent = name;
-  document.getElementById('name-confirm-modal').hidden = false;
 }
 
 async function showPlayerView(name) {
@@ -542,25 +518,6 @@ function showPlayerCardModal(name, stamps, nums) {
     <div>Status: ${hasBingo ? '🏆 BINGO!' : lines >= 3 ? '🔥 Near bingo!' : '🎯 Playing'}</div>
   `;
 
-  // Wire up delete button — remove previous handler then add new one
-  const deleteBtn = document.getElementById('delete-player-btn');
-  if (modalDeleteHandler) {
-    deleteBtn.removeEventListener('click', modalDeleteHandler);
-  }
-  modalDeleteHandler = async () => {
-    if (!confirm(`Delete player "${name}"? This cannot be undone.`)) return;
-    const nameLower = name.toLowerCase().trim();
-    const err = await adminDeletePlayer(nameLower, name);
-    if (err) {
-      alert('Error deleting player. See console for details.');
-      return;
-    }
-    modal.hidden = true;
-    await refreshPlayerMonitor();
-    showSaveToast(`🗑️ ${name} deleted`);
-  };
-  deleteBtn.addEventListener('click', modalDeleteHandler);
-
   modal.hidden = false;
 }
 
@@ -614,7 +571,6 @@ async function adminCallRandom() {
   adminCalledNumbers = calledNumbers;
   updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
   showCalledNumberToast(pick);
-  renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
 }
 
 function showCalledNumberToast(num) {
@@ -782,8 +738,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Show loading
   document.getElementById('loading-overlay').hidden = false;
 
-  // Name form — show confirmation step first
-  document.getElementById('name-form').addEventListener('submit', (e) => {
+  // Name form
+  document.getElementById('name-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const raw = document.getElementById('name-input').value.trim();
     const errorEl = document.getElementById('name-error');
@@ -797,34 +753,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const name = raw.trim();
+    localStorage.setItem(NAME_KEY, name);
 
     if (name.toLowerCase() === ADMIN_NAME) {
       showAdminModal();
     } else {
-      showNameConfirmModal(name);
+      await showPlayerView(name);
     }
-  });
-
-  // Name confirmation — "Yes, that's my name!"
-  document.getElementById('confirm-name-btn').addEventListener('click', async () => {
-    const name = pendingConfirmName;
-    if (!name) return;
-    localStorage.setItem(NAME_KEY, name);
-    pendingConfirmName = null;
-    await showPlayerView(name);
-  });
-
-  // Name confirmation — "Go Back"
-  document.getElementById('confirm-name-back-btn').addEventListener('click', () => {
-    hideAll();
-    document.getElementById('name-modal').hidden = false;
-  });
-
-  // Account deleted modal — "Get a New Card"
-  document.getElementById('account-deleted-ok-btn').addEventListener('click', () => {
-    hideAll();
-    document.getElementById('name-input').value = '';
-    document.getElementById('name-modal').hidden = false;
   });
 
   // Admin password form
@@ -838,7 +773,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     errorEl.hidden = true;
-    localStorage.setItem(NAME_KEY, ADMIN_NAME);
     localStorage.setItem(ADMIN_AUTH_KEY, '1');
     await showAdminView();
   });
@@ -948,34 +882,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  try {
-    if (savedName.toLowerCase() === ADMIN_NAME) {
-      const isAuthed = localStorage.getItem(ADMIN_AUTH_KEY);
-      if (isAuthed) {
-        await showAdminView();
-      } else {
-        hideAll();
-        document.getElementById('admin-modal').hidden = false;
-      }
+  if (savedName.toLowerCase() === ADMIN_NAME) {
+    const isAuthed = localStorage.getItem(ADMIN_AUTH_KEY);
+    if (isAuthed) {
+      await showAdminView();
     } else {
-      // Check if the player still exists in Supabase (may have been deleted by admin)
-      const exists = await checkPlayerExists(savedName.toLowerCase().trim());
-      if (!exists) {
-        // Player was deleted — clear their local data and show the account-deleted modal
-        localStorage.removeItem(NAME_KEY);
-        localStorage.removeItem(stampKey(savedName));
-        hideAll();
-        document.getElementById('account-deleted-modal').hidden = false;
-      } else {
-        await showPlayerView(savedName);
-      }
+      hideAll();
+      document.getElementById('admin-modal').hidden = false;
     }
-  } catch (err) {
-    console.error('Initialization error:', err);
-    hideAll();
-    document.getElementById('name-modal').hidden = false;
-  } finally {
-    // Safety net: ensure spinner is never left showing
-    document.getElementById('loading-overlay').hidden = true;
+  } else {
+    await showPlayerView(savedName);
   }
 });
