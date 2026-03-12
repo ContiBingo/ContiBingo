@@ -1,17 +1,25 @@
 'use strict';
 
 // ============================================================
+// Supabase Configuration
+// ============================================================
+const SUPABASE_URL = 'https://cwkglzaesqquqasgdedm.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable__F_Lg6g9x710yVg-ubCXNQ_Yfwf71LK';
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================================
 // Constants & State
 // ============================================================
 const ADMIN_NAME = 'aidan carter';
-const ADMIN_PASSWORD_KEY = 'contibingo_admin_auth';
+const ADMIN_PASSWORD = 'Pizza111';
 const NAME_KEY = 'contibingo_name';
+const ADMIN_AUTH_KEY = 'contibingo_admin_auth';
 const STAMP_RESET_VERSION_KEY = 'contibingo_stamp_reset_version';
 
 let playerName = null;
-let serverState = { calledNumbers: [], theme: {}, players: [], winners: [], stampResetVersion: 0, playerStamps: {} };
-let socket = null;
-let stampDebounceTimer = null;
+let isAdminView = false;
+let calledNumbers = [];
+let currentStampResetVersion = 0;
 
 // ============================================================
 // Utilities
@@ -32,7 +40,7 @@ function shuffle(arr, rng) {
 }
 
 function getColumnClass(num) {
-  if (num >= 1 && num <= 15)  return 'b';
+  if (num >= 1 && num <= 15) return 'b';
   if (num >= 16 && num <= 30) return 'i';
   if (num >= 31 && num <= 45) return 'n';
   if (num >= 46 && num <= 60) return 'g';
@@ -49,7 +57,6 @@ function generateCard(name) {
     shuffle(range(46, 60), rng).slice(0, 5),
     shuffle(range(61, 75), rng).slice(0, 5),
   ];
-  // Build row-major 5x5
   const card = [];
   for (let row = 0; row < 5; row++) {
     card[row] = [];
@@ -61,7 +68,7 @@ function generateCard(name) {
 }
 
 // ============================================================
-// Stamps (localStorage)
+// Stamps (localStorage + Supabase)
 // ============================================================
 function stampKey(name) {
   return `contibingo_stamps_${name.toLowerCase().trim()}`;
@@ -73,11 +80,22 @@ function getStamps(name) {
   } catch { return []; }
 }
 
-function saveStamps(name, stamps) {
+function saveStampsLocal(name, stamps) {
   localStorage.setItem(stampKey(name), JSON.stringify(stamps));
 }
 
-function clearAllStamps() {
+async function saveStamps(name, stamps) {
+  saveStampsLocal(name, stamps);
+  try {
+    await db.from('players')
+      .update({ stamps })
+      .eq('name_lower', name.toLowerCase().trim());
+  } catch (e) {
+    console.warn('Could not sync stamps to Supabase:', e);
+  }
+}
+
+function clearLocalStamps() {
   const keys = Object.keys(localStorage).filter(k => k.startsWith('contibingo_stamps_'));
   keys.forEach(k => localStorage.removeItem(k));
 }
@@ -93,453 +111,476 @@ function setLocalResetVersion(v) {
 // ============================================================
 // Theme
 // ============================================================
-function applyTheme(theme) {
-  if (!theme) return;
+function applyThemeFromDB(dbTheme) {
+  if (!dbTheme) return;
   const root = document.documentElement;
-  if (theme.bgColor)     root.style.setProperty('--bg-color', theme.bgColor);
-  if (theme.cardColor)   root.style.setProperty('--card-color', theme.cardColor);
-  if (theme.stampColor)  root.style.setProperty('--stamp-color', theme.stampColor);
-  if (theme.headerColor) root.style.setProperty('--header-color', theme.headerColor);
-  if (theme.textColor)   root.style.setProperty('--text-color', theme.textColor);
-  if (theme.accentColor) root.style.setProperty('--accent-color', theme.accentColor);
+  if (dbTheme.bg_color)     root.style.setProperty('--bg-color',     dbTheme.bg_color);
+  if (dbTheme.card_color)   root.style.setProperty('--card-color',   dbTheme.card_color);
+  if (dbTheme.stamp_color)  root.style.setProperty('--stamp-color',  dbTheme.stamp_color);
+  if (dbTheme.header_color) root.style.setProperty('--header-color', dbTheme.header_color);
+  if (dbTheme.text_color)   root.style.setProperty('--text-color',   dbTheme.text_color);
+  if (dbTheme.accent_color) root.style.setProperty('--accent-color', dbTheme.accent_color);
+}
+
+function syncThemePickers(dbTheme) {
+  if (!dbTheme) return;
+  const map = {
+    'theme-bg':     dbTheme.bg_color,
+    'theme-card':   dbTheme.card_color,
+    'theme-stamp':  dbTheme.stamp_color,
+    'theme-header': dbTheme.header_color,
+    'theme-text':   dbTheme.text_color,
+    'theme-accent': dbTheme.accent_color,
+  };
+  Object.entries(map).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el && val) el.value = val;
+  });
 }
 
 // ============================================================
-// Render bingo card
+// Supabase Data Operations
 // ============================================================
-function renderCard(containerEl, name, stamps, calledNumbers, isAdmin = false) {
-  const card = generateCard(name);
-  containerEl.innerHTML = '';
-  for (let row = 0; row < 5; row++) {
-    for (let col = 0; col < 5; col++) {
-      const num = card[row][col];
-      const isFree = num === 0;
-      const isStamped = isFree || stamps.includes(num);
-      const isCallable = !isFree && calledNumbers.includes(num);
+async function loadState() {
+  const [numbersRes, themeRes, playersRes, winnersRes, resetRes] = await Promise.all([
+    db.from('called_numbers').select('number').order('created_at'),
+    db.from('theme').select('*').eq('id', 1).single(),
+    db.from('players').select('name, stamps').order('created_at'),
+    db.from('winners').select('name').order('created_at'),
+    db.from('stamp_resets').select('version').eq('id', 1).single(),
+  ]);
+  return {
+    calledNumbers: (numbersRes.data || []).map(r => r.number),
+    theme: themeRes.data || null,
+    players: playersRes.data || [],
+    winners: (winnersRes.data || []).map(r => r.name),
+    stampResetVersion: (resetRes.data || {}).version || 0,
+  };
+}
+
+async function registerPlayer(name) {
+  await db.from('players').upsert({
+    name: name.trim(),
+    name_lower: name.toLowerCase().trim(),
+    stamps: [],
+  }, { onConflict: 'name_lower', ignoreDuplicates: true });
+}
+
+async function reportWin(name) {
+  await db.from('winners').upsert({ name: name.trim() }, { onConflict: 'name', ignoreDuplicates: true });
+}
+
+async function adminCallNumbers(numbers) {
+  const rows = numbers.map(n => ({ number: n }));
+  const { error } = await db.from('called_numbers').upsert(rows, { onConflict: 'number', ignoreDuplicates: true });
+  return error;
+}
+
+async function adminClearNumbers() {
+  await db.from('called_numbers').delete().neq('id', 0);
+  await db.from('winners').delete().neq('id', 0);
+}
+
+async function adminResetStamps() {
+  const { data } = await db.from('stamp_resets').select('version').eq('id', 1).single();
+  const newVersion = ((data && data.version) || 0) + 1;
+  await db.from('stamp_resets').update({ version: newVersion }).eq('id', 1);
+  await db.from('players').update({ stamps: [] }).neq('id', 0);
+}
+
+async function adminSetTheme(theme) {
+  await db.from('theme').update({
+    bg_color:     theme.bgColor,
+    card_color:   theme.cardColor,
+    stamp_color:  theme.stampColor,
+    header_color: theme.headerColor,
+    text_color:   theme.textColor,
+    accent_color: theme.accentColor,
+  }).eq('id', 1);
+}
+
+// ============================================================
+// Bingo Win Detection
+// ============================================================
+function checkBingo(card, stamps) {
+  const stamped = new Set(stamps);
+  // rows
+  for (let r = 0; r < 5; r++) {
+    if (card[r].every(n => n === 0 || stamped.has(n))) return true;
+  }
+  // cols
+  for (let c = 0; c < 5; c++) {
+    if (card.map(row => row[c]).every(n => n === 0 || stamped.has(n))) return true;
+  }
+  // diagonals
+  if ([0,1,2,3,4].every(i => card[i][i] === 0 || stamped.has(card[i][i]))) return true;
+  if ([0,1,2,3,4].every(i => card[i][4-i] === 0 || stamped.has(card[i][4-i]))) return true;
+  return false;
+}
+
+function countLines(card, stamps) {
+  const stamped = new Set(stamps);
+  let lines = 0;
+  for (let r = 0; r < 5; r++) {
+    if (card[r].every(n => n === 0 || stamped.has(n))) lines++;
+  }
+  for (let c = 0; c < 5; c++) {
+    if (card.map(row => row[c]).every(n => n === 0 || stamped.has(n))) lines++;
+  }
+  if ([0,1,2,3,4].every(i => card[i][i] === 0 || stamped.has(card[i][i]))) lines++;
+  if ([0,1,2,3,4].every(i => card[i][4-i] === 0 || stamped.has(card[i][4-i]))) lines++;
+  return lines;
+}
+
+// ============================================================
+// Render Bingo Card
+// ============================================================
+function renderCard(container, card, stamps, calledNums, clickable) {
+  const stamped = new Set(stamps);
+  const called  = new Set(calledNums);
+  container.innerHTML = '';
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const num = card[r][c];
       const cell = document.createElement('div');
       cell.className = 'bingo-cell';
-      if (isFree)     { cell.classList.add('free', 'stamped'); }
-      else if (isStamped) { cell.classList.add('stamped', 'callable'); }
-      else if (isCallable) { cell.classList.add('callable'); }
-      else            { cell.classList.add('uncallable'); }
-      const span = document.createElement('span');
-      span.className = 'cell-number';
-      span.textContent = isFree ? 'FREE' : num;
-      cell.appendChild(span);
-      cell.dataset.num = num;
-      cell.dataset.row = row;
-      cell.dataset.col = col;
-      if (!isAdmin && !isFree) {
-        cell.addEventListener('click', () => handleCellClick(cell, num, name));
+      const isFree = (num === 0);
+      if (isFree) {
+        cell.classList.add('free', 'stamped');
+        cell.innerHTML = '<span class="cell-number">FREE</span>';
+      } else {
+        cell.innerHTML = `<span class="cell-number">${num}</span>`;
+        if (stamped.has(num)) cell.classList.add('stamped');
+        if (called.has(num)) {
+          cell.classList.add('callable');
+          if (clickable) {
+            cell.addEventListener('click', () => onCellClick(num, card));
+          }
+        } else {
+          cell.classList.add('uncallable');
+        }
       }
-      containerEl.appendChild(cell);
+      container.appendChild(cell);
     }
   }
 }
 
-function handleCellClick(cell, num, name) {
-  const calledNumbers = serverState.calledNumbers || [];
-  if (!calledNumbers.includes(num)) {
-    cell.classList.add('shake');
-    cell.addEventListener('animationend', () => cell.classList.remove('shake'), { once: true });
-    return;
-  }
-  const stamps = getStamps(name);
-  if (stamps.includes(num)) return; // already stamped
-  stamps.push(num);
-  saveStamps(name, stamps);
-  cell.classList.add('stamped');
-  cell.classList.remove('callable');
-  // Report stamp to server (debounced)
-  clearTimeout(stampDebounceTimer);
-  stampDebounceTimer = setTimeout(() => reportStamps(name, stamps), 500);
-  checkWin(name);
-}
-
-async function reportStamps(name, stamps) {
-  try {
-    await fetch('/api/report-stamp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, stamps })
-    });
-  } catch (e) { /* silent */ }
-}
-
-// ============================================================
-// Win Detection
-// ============================================================
-function checkWin(name) {
-  const card = generateCard(name);
-  const stamps = getStamps(name);
-  const lines = [];
-  // rows
-  for (let r = 0; r < 5; r++) lines.push(card[r]);
-  // cols
-  for (let c = 0; c < 5; c++) lines.push(card.map(r => r[c]));
-  // diagonals
-  lines.push([card[0][0], card[1][1], card[2][2], card[3][3], card[4][4]]);
-  lines.push([card[0][4], card[1][3], card[2][2], card[3][1], card[4][0]]);
-
-  for (const line of lines) {
-    if (line.every(n => n === 0 || stamps.includes(n))) {
-      triggerWin(name);
-      return;
-    }
-  }
-}
-
-let winReported = false;
-async function triggerWin(name) {
-  if (winReported) return;
-  winReported = true;
-  document.getElementById('win-player-name').textContent = name;
-  document.getElementById('win-overlay').hidden = false;
-  try {
-    await fetch('/api/report-win', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    });
-  } catch (e) { /* silent */ }
-}
-
-// ============================================================
-// Called numbers display
-// ============================================================
-function renderCalledNumbers(containerEl, numbers) {
-  containerEl.innerHTML = '';
-  [...numbers].sort((a, b) => a - b).forEach(n => {
-    const badge = document.createElement('span');
-    badge.className = `number-badge badge-${getColumnClass(n)}`;
-    badge.textContent = n;
-    containerEl.appendChild(badge);
-  });
-}
-
-// ============================================================
-// Socket.IO
-// ============================================================
-function initSocket() {
-  socket = io();
-  socket.on('state-update', (state) => {
-    handleStateUpdate(state);
-  });
-  socket.on('stamp-reset', ({ version }) => {
-    if (version > getLocalResetVersion()) {
-      setLocalResetVersion(version);
-      clearAllStamps();
-      winReported = false;
-      if (playerName) refreshPlayerView();
-    }
-  });
-  socket.on('winner', ({ name }) => {
-    if (isAdminView()) {
-      renderAdminWinners(serverState.winners);
-      showAdminWinnerAlert(name);
-    }
-  });
-}
-
-function isAdminView() {
-  return !document.getElementById('admin-view').hidden;
-}
-
-function handleStateUpdate(state) {
-  serverState = state;
-  applyTheme(state.theme);
-  if (!document.getElementById('player-view').hidden) {
-    refreshPlayerView();
-  }
-  if (isAdminView()) {
-    refreshAdminView();
-  }
-  // Check stamp reset version
-  const serverVersion = state.stampResetVersion || 0;
-  if (serverVersion > getLocalResetVersion()) {
-    setLocalResetVersion(serverVersion);
-    clearAllStamps();
-    winReported = false;
-    if (playerName) refreshPlayerView();
-  }
-}
-
-function refreshPlayerView() {
+function onCellClick(num, card) {
   const stamps = getStamps(playerName);
-  const cardEl = document.getElementById('bingo-card');
-  renderCard(cardEl, playerName, stamps, serverState.calledNumbers || []);
-  renderCalledNumbers(document.getElementById('called-numbers-display'), serverState.calledNumbers || []);
+  const idx = stamps.indexOf(num);
+  if (idx === -1) {
+    stamps.push(num);
+  } else {
+    stamps.splice(idx, 1);
+  }
+  saveStamps(playerName, stamps);
+  rerenderCard(card, stamps);
+  if (checkBingo(card, stamps)) {
+    showWinOverlay(playerName);
+    reportWin(playerName);
+  }
+}
+
+function rerenderCard(card, stamps) {
+  const container = document.getElementById('bingo-card');
+  if (!container) return;
+  renderCard(container, card, stamps, calledNumbers, true);
 }
 
 // ============================================================
-// Admin View
+// Called Numbers Display
 // ============================================================
-function refreshAdminView() {
-  renderCalledNumbers(document.getElementById('admin-called-numbers'), serverState.calledNumbers || []);
-  renderPlayerList(serverState.players || []);
-  renderAdminWinners(serverState.winners || []);
-  // Sync theme pickers
-  const t = serverState.theme || {};
-  if (t.bgColor)     document.getElementById('theme-bg').value = t.bgColor;
-  if (t.cardColor)   document.getElementById('theme-card').value = t.cardColor;
-  if (t.stampColor)  document.getElementById('theme-stamp').value = t.stampColor;
-  if (t.headerColor) document.getElementById('theme-header').value = t.headerColor;
-  if (t.textColor)   document.getElementById('theme-text').value = t.textColor;
-  if (t.accentColor) document.getElementById('theme-accent').value = t.accentColor;
+function updateCalledNumbersDisplay(nums, containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '';
+  nums.slice().sort((a, b) => a - b).forEach(num => {
+    const badge = document.createElement('span');
+    const col = getColumnClass(num);
+    badge.className = `number-badge badge-${col}`;
+    badge.textContent = num;
+    el.appendChild(badge);
+  });
 }
 
-let allPlayers = [];
-function renderPlayerList(players) {
-  allPlayers = players;
-  filterAndRenderPlayers(document.getElementById('player-search').value);
+// ============================================================
+// Views
+// ============================================================
+function hideAll() {
+  document.getElementById('loading-overlay').hidden = true;
+  document.getElementById('name-modal').hidden = true;
+  document.getElementById('admin-modal').hidden = true;
+  document.getElementById('player-view').hidden = true;
+  document.getElementById('admin-view').hidden = true;
 }
 
-function filterAndRenderPlayers(query) {
+function showNameModal() {
+  hideAll();
+  document.getElementById('name-modal').hidden = false;
+}
+
+function showAdminModal() {
+  hideAll();
+  document.getElementById('admin-modal').hidden = false;
+}
+
+async function showPlayerView(name) {
+  hideAll();
+  isAdminView = false;
+  playerName = name;
+  document.getElementById('header-player-name').textContent = name;
+  document.getElementById('card-player-name').textContent = name;
+  document.getElementById('player-view').hidden = false;
+
+  // Register player and load state
+  await registerPlayer(name);
+  const state = await loadState();
+  calledNumbers = state.calledNumbers;
+  currentStampResetVersion = state.stampResetVersion;
+  if (state.theme) applyThemeFromDB(state.theme);
+
+  // Handle stamp reset
+  const localVersion = getLocalResetVersion();
+  if (state.stampResetVersion > localVersion) {
+    clearLocalStamps();
+    setLocalResetVersion(state.stampResetVersion);
+  }
+
+  const stamps = getStamps(name);
+  const card = generateCard(name);
+  rerenderCard(card, stamps);
+  updateCalledNumbersDisplay(calledNumbers, 'called-numbers-display');
+
+  subscribeToRealtime(card);
+}
+
+async function showAdminView() {
+  hideAll();
+  isAdminView = true;
+  document.getElementById('admin-view').hidden = false;
+
+  const state = await loadState();
+  calledNumbers = state.calledNumbers;
+  if (state.theme) {
+    applyThemeFromDB(state.theme);
+    syncThemePickers(state.theme);
+  }
+  updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
+  renderWinners(state.winners);
+  renderPlayerList(state.players, state.winners, calledNumbers);
+
+  subscribeToRealtimeAdmin();
+}
+
+// ============================================================
+// Admin — Player Monitor
+// ============================================================
+function renderPlayerList(players, winners, nums) {
   const list = document.getElementById('player-list');
-  const filtered = allPlayers.filter(p => p.name.toLowerCase().includes(query.toLowerCase()));
+  if (!list) return;
+  const winnerSet = new Set((winners || []).map(w => w.toLowerCase()));
+  const filter = (document.getElementById('player-search').value || '').toLowerCase();
+  const filtered = players.filter(p => p.name.toLowerCase().includes(filter));
   list.innerHTML = '';
   if (filtered.length === 0) {
-    list.innerHTML = '<p style="opacity:0.5;font-size:0.9rem">No players yet.</p>';
+    list.innerHTML = '<p style="opacity:0.5;font-size:0.9rem;">No players yet.</p>';
     return;
   }
-  filtered.forEach(player => {
+  filtered.forEach(p => {
     const item = document.createElement('div');
-    item.className = 'player-item';
-    const isWinner = (serverState.winners || []).some(w => w.toLowerCase() === player.name.toLowerCase());
-    if (isWinner) item.classList.add('bingo-winner');
-    item.innerHTML = `${isWinner ? '🏆 ' : '👤 '}<span>${player.name}</span>`;
-    item.addEventListener('click', () => showPlayerCardModal(player.name));
+    item.className = 'player-item' + (winnerSet.has(p.name.toLowerCase()) ? ' bingo-winner' : '');
+    item.textContent = (winnerSet.has(p.name.toLowerCase()) ? '🏆 ' : '') + p.name;
+    item.addEventListener('click', () => showPlayerCardModal(p.name, p.stamps || [], nums));
     list.appendChild(item);
   });
 }
 
-function renderAdminWinners(winners) {
+async function refreshPlayerMonitor() {
+  const state = await loadState();
+  renderPlayerList(state.players, state.winners, state.calledNumbers);
+  renderWinners(state.winners);
+}
+
+function renderWinners(winners) {
   const el = document.getElementById('admin-winners');
+  if (!el) return;
+  el.innerHTML = '';
   if (!winners || winners.length === 0) {
-    el.innerHTML = '<p style="opacity:0.5;font-size:0.9rem">No winners yet.</p>';
+    el.innerHTML = '<p style="opacity:0.5;font-size:0.9rem;">No winners yet.</p>';
     return;
   }
-  el.innerHTML = winners.map(w =>
-    `<div class="winner-item"><span class="winner-item-trophy">🏆</span>${w}</div>`
-  ).join('');
+  winners.forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'winner-item';
+    item.innerHTML = `<span class="winner-item-trophy">🏆</span><span>${name}</span>`;
+    el.appendChild(item);
+  });
 }
 
-function showAdminWinnerAlert(name) {
-  const msg = `🏆 Winner detected: ${name}!`;
-  const banner = document.createElement('div');
-  banner.style.cssText = `
-    position:fixed;top:80px;right:1.5rem;
-    background:#f1c40f;color:#000;
-    padding:1rem 1.5rem;border-radius:10px;
-    font-weight:700;font-size:1rem;
-    z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4);
-    animation:slideUp 0.3s ease;
-  `;
-  banner.textContent = msg;
-  document.body.appendChild(banner);
-  setTimeout(() => banner.remove(), 5000);
+function showWinnerAlert(name) {
+  const el = document.getElementById('admin-winners');
+  if (!el) return;
+  // A simple flash alert at top of winners section
+  const alert = document.createElement('div');
+  alert.style.cssText = 'background:#f1c40f;color:#000;padding:0.75rem 1rem;border-radius:8px;font-weight:700;margin-bottom:0.5rem;animation:badgeSlideIn 0.3s ease';
+  alert.textContent = `🎉 Winner detected: ${name}!`;
+  el.insertBefore(alert, el.firstChild);
+  setTimeout(() => alert.remove(), 8000);
 }
 
-function showPlayerCardModal(name) {
+function showPlayerCardModal(name, stamps, nums) {
+  const card = generateCard(name);
   const modal = document.getElementById('player-card-modal');
   document.getElementById('modal-player-name-title').textContent = name;
-
-  const stamps = (serverState.playerStamps || {})[name.toLowerCase().trim()] || [];
-  const cardEl = document.getElementById('modal-bingo-card');
-  renderCard(cardEl, name, stamps, serverState.calledNumbers || [], true);
+  const cardContainer = document.getElementById('modal-bingo-card');
+  renderCard(cardContainer, card, stamps, nums, false);
 
   // Stats
-  const card = generateCard(name);
-  const lines = [];
-  for (let r = 0; r < 5; r++) lines.push(card[r]);
-  for (let c = 0; c < 5; c++) lines.push(card.map(r => r[c]));
-  lines.push([card[0][0], card[1][1], card[2][2], card[3][3], card[4][4]]);
-  lines.push([card[0][4], card[1][3], card[2][2], card[3][1], card[4][0]]);
-
-  const completedLines = lines.filter(line => line.every(n => n === 0 || stamps.includes(n))).length;
-  const totalStamped = stamps.length;
-  const isBingo = completedLines > 0;
-
-  document.getElementById('modal-player-stats').innerHTML = `
-    <strong>Stamps:</strong> ${totalStamped} &nbsp;|&nbsp;
-    <strong>Lines:</strong> ${completedLines} / 12 &nbsp;|&nbsp;
-    <strong>Status:</strong> ${isBingo ? '🏆 BINGO!' : `${completedLines === 0 ? 'No lines yet' : `${completedLines} line(s) complete`}`}
-    ${stamps.length > 0 ? `<br/><strong>Stamped numbers:</strong> ${stamps.join(', ')}` : ''}
-    <br/><small style="opacity:0.5">Stamps based on server-reported data</small>
+  const statsEl = document.getElementById('modal-player-stats');
+  const stamped = new Set(stamps);
+  const lines = countLines(card, stamps);
+  const totalCallable = card.flat().filter(n => n !== 0 && new Set(nums).has(n)).length;
+  const totalStamped = card.flat().filter(n => n !== 0 && stamped.has(n)).length;
+  const hasBingo = checkBingo(card, stamps);
+  statsEl.innerHTML = `
+    <div>Stamped: ${totalStamped} / ${totalCallable} callable numbers</div>
+    <div>Lines: ${lines} / 12</div>
+    <div>Status: ${hasBingo ? '🏆 BINGO!' : lines >= 3 ? '🔥 Near bingo!' : '🎯 Playing'}</div>
   `;
 
   modal.hidden = false;
 }
 
 // ============================================================
-// Admin actions
+// Win Overlay (player)
 // ============================================================
-async function adminPost(path, body) {
-  const adminPassword = localStorage.getItem('contibingo_admin_pass') || '';
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...body, password: adminPassword })
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+function showWinOverlay(name) {
+  const overlay = document.getElementById('win-overlay');
+  document.getElementById('win-player-name').textContent = name;
+  overlay.hidden = false;
 }
 
 // ============================================================
-// View switching
+// Realtime Subscriptions
 // ============================================================
-function showLoading(show) {
-  document.getElementById('loading-overlay').hidden = !show;
+function subscribeToRealtime(card) {
+  db.channel('called_numbers_ch')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'called_numbers' }, async () => {
+      const state = await loadState();
+      calledNumbers = state.calledNumbers;
+      updateCalledNumbersDisplay(calledNumbers, 'called-numbers-display');
+      const stamps = getStamps(playerName);
+      rerenderCard(card, stamps);
+    })
+    .subscribe();
+
+  db.channel('theme_ch')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'theme' }, (payload) => {
+      applyThemeFromDB(payload.new);
+    })
+    .subscribe();
+
+  db.channel('stamp_resets_ch')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'stamp_resets' }, (payload) => {
+      const serverVersion = payload.new.version;
+      const localVersion = getLocalResetVersion();
+      if (serverVersion > localVersion) {
+        clearLocalStamps();
+        setLocalResetVersion(serverVersion);
+        const stamps = getStamps(playerName); // will be empty now
+        rerenderCard(card, stamps);
+      }
+    })
+    .subscribe();
 }
 
-function showView(viewId) {
-  ['name-modal', 'admin-modal', 'player-view', 'admin-view'].forEach(id => {
-    const el = document.getElementById(id);
-    el.hidden = (id !== viewId);
-  });
-}
+function subscribeToRealtimeAdmin() {
+  db.channel('called_numbers_admin_ch')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'called_numbers' }, async () => {
+      const state = await loadState();
+      calledNumbers = state.calledNumbers;
+      updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
+    })
+    .subscribe();
 
-function showNameModal() {
-  showView('name-modal');
-  showLoading(false);
-}
+  db.channel('theme_admin_ch')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'theme' }, (payload) => {
+      applyThemeFromDB(payload.new);
+      syncThemePickers(payload.new);
+    })
+    .subscribe();
 
-function showAdminModal() {
-  showView('admin-modal');
-  showLoading(false);
-}
+  db.channel('winners_admin_ch')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'winners' }, (payload) => {
+      showWinnerAlert(payload.new.name);
+      refreshPlayerMonitor();
+    })
+    .subscribe();
 
-function showPlayerView(name) {
-  document.getElementById('header-player-name').textContent = name;
-  document.getElementById('card-player-name').textContent = name;
-  showView('player-view');
-  showLoading(false);
-  refreshPlayerView();
-}
-
-function showAdminView() {
-  showView('admin-view');
-  showLoading(false);
-  refreshAdminView();
-}
-
-// ============================================================
-// Initialization
-// ============================================================
-async function loadInitialState() {
-  try {
-    const res = await fetch('/api/state');
-    if (!res.ok) throw new Error('Failed to load state');
-    serverState = await res.json();
-    applyTheme(serverState.theme);
-    // Check stamp reset
-    const serverVersion = serverState.stampResetVersion || 0;
-    if (serverVersion > getLocalResetVersion()) {
-      setLocalResetVersion(serverVersion);
-      clearAllStamps();
-    }
-  } catch (e) {
-    console.error('Failed to load state:', e);
-  }
-}
-
-async function init() {
-  showLoading(true);
-  initSocket();
-  await loadInitialState();
-
-  const savedName = localStorage.getItem(NAME_KEY);
-  if (!savedName) {
-    showNameModal();
-    return;
-  }
-
-  playerName = savedName;
-  if (playerName.toLowerCase().trim() === ADMIN_NAME) {
-    const adminAuth = localStorage.getItem(ADMIN_PASSWORD_KEY);
-    if (adminAuth === 'true') {
-      showAdminView();
-    } else {
-      showAdminModal();
-    }
-  } else {
-    showPlayerView(playerName);
-  }
+  db.channel('players_admin_ch')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, async () => {
+      await refreshPlayerMonitor();
+    })
+    .subscribe();
 }
 
 // ============================================================
-// Event Listeners
+// DOM Event Handlers
 // ============================================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Show loading
+  document.getElementById('loading-overlay').hidden = false;
+
   // Name form
   document.getElementById('name-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const input = document.getElementById('name-input').value.trim();
-    const errEl = document.getElementById('name-error');
-    if (!input || input.split(/\s+/).filter(Boolean).length < 2) {
-      errEl.textContent = 'Please enter your first and last name.';
-      errEl.hidden = false;
+    const raw = document.getElementById('name-input').value.trim();
+    const errorEl = document.getElementById('name-error');
+    errorEl.hidden = true;
+
+    const parts = raw.trim().split(/\s+/);
+    if (parts.length < 2) {
+      errorEl.textContent = 'Please enter your first and last name.';
+      errorEl.hidden = false;
       return;
     }
-    errEl.hidden = true;
-    playerName = input;
-    localStorage.setItem(NAME_KEY, playerName);
-    // Register with server
-    try {
-      await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: playerName })
-      });
-    } catch (e) { /* silent */ }
 
-    if (playerName.toLowerCase().trim() === ADMIN_NAME) {
+    const name = raw.trim();
+    localStorage.setItem(NAME_KEY, name);
+
+    if (name.toLowerCase() === ADMIN_NAME) {
       showAdminModal();
     } else {
-      showPlayerView(playerName);
+      await showPlayerView(name);
     }
   });
 
   // Admin password form
   document.getElementById('admin-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const pwd = document.getElementById('admin-password-input').value;
-    const errEl = document.getElementById('admin-error');
-    // Validate with server
-    try {
-      const res = await fetch('/api/admin/call-numbers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ numbers: [], password: pwd })
-      });
-      if (res.ok) {
-        localStorage.setItem(ADMIN_PASSWORD_KEY, 'true');
-        localStorage.setItem('contibingo_admin_pass', pwd);
-        errEl.hidden = true;
-        showAdminView();
-      } else {
-        errEl.hidden = false;
-        document.getElementById('admin-password-input').value = '';
-      }
-    } catch (err) {
-      errEl.textContent = 'Connection error. Try again.';
-      errEl.hidden = false;
+    const pw = document.getElementById('admin-password-input').value;
+    const errorEl = document.getElementById('admin-error');
+    if (pw !== ADMIN_PASSWORD) {
+      errorEl.hidden = false;
+      document.getElementById('admin-password-input').value = '';
+      return;
     }
+    errorEl.hidden = true;
+    localStorage.setItem(ADMIN_AUTH_KEY, '1');
+    await showAdminView();
   });
 
+  // Admin back button
   document.getElementById('admin-back-btn').addEventListener('click', () => {
     localStorage.removeItem(NAME_KEY);
-    localStorage.removeItem(ADMIN_PASSWORD_KEY);
-    playerName = null;
     showNameModal();
   });
 
+  // Admin logout
   document.getElementById('admin-logout-btn').addEventListener('click', () => {
-    localStorage.removeItem(ADMIN_PASSWORD_KEY);
-    localStorage.removeItem('contibingo_admin_pass');
     localStorage.removeItem(NAME_KEY);
-    playerName = null;
-    showNameModal();
+    localStorage.removeItem(ADMIN_AUTH_KEY);
+    location.reload();
   });
 
   // Apply theme
@@ -552,79 +593,81 @@ document.addEventListener('DOMContentLoaded', () => {
       textColor:   document.getElementById('theme-text').value,
       accentColor: document.getElementById('theme-accent').value,
     };
-    try {
-      await adminPost('/api/admin/set-theme', { theme });
-    } catch (e) {
-      alert('Failed to apply theme. Check admin credentials.');
-    }
+    await adminSetTheme(theme);
+    applyThemeFromDB({
+      bg_color: theme.bgColor, card_color: theme.cardColor,
+      stamp_color: theme.stampColor, header_color: theme.headerColor,
+      text_color: theme.textColor, accent_color: theme.accentColor,
+    });
   });
 
   // Call single number
   document.getElementById('call-number-btn').addEventListener('click', async () => {
     const val = parseInt(document.getElementById('single-number-input').value, 10);
-    if (!val || val < 1 || val > 75) {
-      alert('Please enter a valid number between 1 and 75.');
-      return;
-    }
-    try {
-      await adminPost('/api/admin/call-numbers', { numbers: [val] });
-      document.getElementById('single-number-input').value = '';
-    } catch (e) {
-      alert('Failed to call number.');
-    }
+    if (!val || val < 1 || val > 75) return;
+    await adminCallNumbers([val]);
+    document.getElementById('single-number-input').value = '';
+    const state = await loadState();
+    calledNumbers = state.calledNumbers;
+    updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
   });
 
   // Call multiple numbers
   document.getElementById('call-multi-btn').addEventListener('click', async () => {
     const raw = document.getElementById('multi-number-input').value;
-    const nums = raw.split(/[\s,]+/).map(s => parseInt(s, 10)).filter(n => !isNaN(n) && n >= 1 && n <= 75);
-    if (nums.length === 0) {
-      alert('No valid numbers found. Enter numbers between 1 and 75.');
-      return;
-    }
-    try {
-      await adminPost('/api/admin/call-numbers', { numbers: nums });
-      document.getElementById('multi-number-input').value = '';
-    } catch (e) {
-      alert('Failed to call numbers.');
-    }
+    const nums = raw.split(/[\s,]+/)
+      .map(s => parseInt(s, 10))
+      .filter(n => !isNaN(n) && n >= 1 && n <= 75);
+    if (nums.length === 0) return;
+    await adminCallNumbers(nums);
+    document.getElementById('multi-number-input').value = '';
+    const state = await loadState();
+    calledNumbers = state.calledNumbers;
+    updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
   });
 
   // Clear all numbers
   document.getElementById('clear-numbers-btn').addEventListener('click', async () => {
     if (!confirm('Clear all called numbers and winners?')) return;
-    try {
-      await adminPost('/api/admin/clear-numbers', {});
-    } catch (e) {
-      alert('Failed to clear numbers.');
-    }
+    await adminClearNumbers();
+    calledNumbers = [];
+    updateCalledNumbersDisplay([], 'admin-called-numbers');
+    renderWinners([]);
   });
 
   // Reset stamps
   document.getElementById('reset-stamps-btn').addEventListener('click', async () => {
     if (!confirm('Reset ALL player stamps? This cannot be undone.')) return;
-    try {
-      await adminPost('/api/admin/reset-stamps', {});
-    } catch (e) {
-      alert('Failed to reset stamps.');
-    }
+    await adminResetStamps();
   });
 
   // Player search
-  document.getElementById('player-search').addEventListener('input', (e) => {
-    filterAndRenderPlayers(e.target.value);
+  document.getElementById('player-search').addEventListener('input', async () => {
+    await refreshPlayerMonitor();
   });
 
   // Close player card modal
   document.getElementById('close-player-modal').addEventListener('click', () => {
     document.getElementById('player-card-modal').hidden = true;
   });
-  document.getElementById('player-card-modal').addEventListener('click', (e) => {
-    if (e.target === document.getElementById('player-card-modal')) {
-      document.getElementById('player-card-modal').hidden = true;
-    }
-  });
 
-  // Start!
-  init();
+  // ---- Initialization Flow ----
+  const savedName = localStorage.getItem(NAME_KEY);
+  if (!savedName) {
+    hideAll();
+    document.getElementById('name-modal').hidden = false;
+    return;
+  }
+
+  if (savedName.toLowerCase() === ADMIN_NAME) {
+    const isAuthed = localStorage.getItem(ADMIN_AUTH_KEY);
+    if (isAuthed) {
+      await showAdminView();
+    } else {
+      hideAll();
+      document.getElementById('admin-modal').hidden = false;
+    }
+  } else {
+    await showPlayerView(savedName);
+  }
 });

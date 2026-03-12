@@ -1,19 +1,11 @@
 {
   "name": "contibingo",
   "version": "1.0.0",
-  "description": "ContiBingo - A real-time bingo web application",
-  "main": "server.js",
+  "description": "ContiBingo — a real-time multiplayer bingo app powered by Supabase",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "npx serve public",
+    "dev": "npx serve public"
   },
-  "keywords": ["bingo", "game", "web-app"],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "socket.io": "^4.7.2",
-    "seedrandom": "^3.0.5"
-  }
+  "keywords": ["bingo", "game", "supabase"],
+  "license": "MIT"
 }
