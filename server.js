@@ -15,6 +15,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const DATA_FILE = path.join(__dirname, 'data', 'state.json');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Pizza111';
+if (!process.env.ADMIN_PASSWORD) {
+  console.warn('Warning: Using default admin password. Set ADMIN_PASSWORD env var in production.');
+}
 
 const DEFAULT_STATE = {
   calledNumbers: [],
@@ -32,11 +35,33 @@ const DEFAULT_STATE = {
   playerStamps: {}
 };
 
+function validateLoadedState(parsed) {
+  if (typeof parsed !== 'object' || parsed === null) return false;
+  if (!Array.isArray(parsed.calledNumbers)) return false;
+  if (!Array.isArray(parsed.players)) return false;
+  if (!Array.isArray(parsed.winners)) return false;
+  if (parsed.calledNumbers.some(n => typeof n !== 'number' || n < 1 || n > 75)) return false;
+  return true;
+}
+
 function loadState() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
-      return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      if (!validateLoadedState(parsed)) {
+        console.warn('State file failed validation, using default state.');
+        return { ...DEFAULT_STATE };
+      }
+      return {
+        ...DEFAULT_STATE,
+        calledNumbers: parsed.calledNumbers || [],
+        theme: (typeof parsed.theme === 'object' && parsed.theme) ? { ...DEFAULT_STATE.theme, ...parsed.theme } : DEFAULT_STATE.theme,
+        players: parsed.players || [],
+        winners: parsed.winners || [],
+        stampResetVersion: typeof parsed.stampResetVersion === 'number' ? parsed.stampResetVersion : 0,
+        playerStamps: (typeof parsed.playerStamps === 'object' && parsed.playerStamps && !Array.isArray(parsed.playerStamps)) ? parsed.playerStamps : {}
+      };
     }
   } catch (e) {
     console.error('Error loading state:', e.message);
