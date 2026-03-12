@@ -40,12 +40,21 @@ create table if not exists stamp_resets (
 );
 insert into stamp_resets (id) values (1) on conflict do nothing;
 
+-- Game settings: win mode and custom pattern (single row, id=1)
+create table if not exists game_settings (
+  id integer primary key default 1,
+  win_mode text default 'classic',
+  custom_pattern boolean[] default '{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false}'
+);
+insert into game_settings (id) values (1) on conflict do nothing;
+
 -- Enable Row Level Security (RLS) - allow all for anon since this is a fun game app
 alter table called_numbers enable row level security;
 alter table players enable row level security;
 alter table winners enable row level security;
 alter table theme enable row level security;
 alter table stamp_resets enable row level security;
+alter table game_settings enable row level security;
 
 -- Allow full access for anon key
 create policy "allow all" on called_numbers for all to anon using (true) with check (true);
@@ -53,6 +62,7 @@ create policy "allow all" on players for all to anon using (true) with check (tr
 create policy "allow all" on winners for all to anon using (true) with check (true);
 create policy "allow all" on theme for all to anon using (true) with check (true);
 create policy "allow all" on stamp_resets for all to anon using (true) with check (true);
+create policy "allow all" on game_settings for all to anon using (true) with check (true);
 
 -- Enable realtime for all tables
 alter publication supabase_realtime add table called_numbers;
@@ -60,3 +70,4 @@ alter publication supabase_realtime add table players;
 alter publication supabase_realtime add table winners;
 alter publication supabase_realtime add table theme;
 alter publication supabase_realtime add table stamp_resets;
+alter publication supabase_realtime add table game_settings;

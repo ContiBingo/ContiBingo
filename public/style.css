@@ -709,6 +709,29 @@ textarea.modal-input { resize: vertical; min-height: 60px; }
   font-variant-numeric: tabular-nums;
 }
 
+.confirm-name-display {
+  font-size: 1.5rem;
+  font-weight: 800;
+  text-align: center;
+  padding: 0.75rem 1.25rem;
+  margin: 0.75rem 0;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  word-break: break-word;
+}
+.confirm-warning {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  opacity: 0.75;
+  text-align: center;
+  margin-bottom: 1.25rem;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.25);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+}
+
 /* ---- RESPONSIVE ---- */
 @media (max-width: 600px) {
   .player-main { padding: 1rem; }
