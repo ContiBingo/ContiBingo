@@ -393,7 +393,7 @@ function showNameConfirmModal(name) {
   document.getElementById('name-confirm-modal').hidden = false;
 }
 
-
+async function showPlayerView(name) {
   hideAll();
   isAdminView = false;
   playerName = name;
@@ -974,5 +974,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Initialization error:', err);
     hideAll();
     document.getElementById('name-modal').hidden = false;
+  } finally {
+    // Safety net: ensure spinner is never left showing
+    document.getElementById('loading-overlay').hidden = true;
   }
 });
