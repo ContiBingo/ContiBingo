@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ContiBingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -63,6 +65,7 @@
       <div class="player-card-section">
         <div class="card-header">
           <h2 id="card-player-name"></h2>
+          <div id="win-mode-display" class="win-mode-badge">🎯 Classic (Lines)</div>
           <div class="bingo-header-row">
             <span class="bingo-letter b">B</span>
             <span class="bingo-letter i">I</span>
@@ -109,6 +112,7 @@
       <section class="admin-section">
         <h2 class="section-title">📣 Number Caller</h2>
         <div class="number-caller-controls">
+          <button class="btn btn-accent btn-glow btn-full" id="call-random-btn">🎲 Call Random Number</button>
           <div class="input-row">
             <input type="number" id="single-number-input" class="modal-input" placeholder="Enter number (1-75)" min="1" max="75" />
             <button class="btn btn-primary" id="call-number-btn">Call Number</button>
@@ -126,8 +130,8 @@
       <!-- Section C: Player Monitor -->
       <section class="admin-section admin-section-wide">
         <h2 class="section-title">👥 Player Monitor</h2>
-        <div style="display:flex;gap:0.5rem;align-items:center;">
-          <input type="text" id="player-search" class="modal-input" placeholder="Search players..." style="flex:1;" />
+        <div class="search-row">
+          <input type="text" id="player-search" class="modal-input" placeholder="🔍 Search players..." />
           <button class="btn btn-secondary btn-sm" id="refresh-players-btn">🔄 Refresh</button>
         </div>
         <div id="player-list" class="player-list"></div>
@@ -137,6 +141,44 @@
       <section class="admin-section">
         <h2 class="section-title">🏆 Winners</h2>
         <div id="admin-winners" class="winners-list"></div>
+      </section>
+
+      <!-- Section E: Win Condition -->
+      <section class="admin-section admin-section-wide" id="win-mode-section">
+        <h2 class="section-title">🏆 Win Condition</h2>
+        <p class="section-desc">Choose what pattern players need to complete to win.</p>
+        <div class="win-mode-grid" id="win-mode-selector">
+          <div class="win-mode-card active" data-mode="classic">
+            <div class="win-mode-icon">🎯</div>
+            <div class="win-mode-name">Classic</div>
+            <div class="win-mode-desc">Any line or diagonal</div>
+          </div>
+          <div class="win-mode-card" data-mode="x">
+            <div class="win-mode-icon">❌</div>
+            <div class="win-mode-name">X Pattern</div>
+            <div class="win-mode-desc">Both diagonals</div>
+          </div>
+          <div class="win-mode-card" data-mode="blackout">
+            <div class="win-mode-icon">⬛</div>
+            <div class="win-mode-name">Blackout</div>
+            <div class="win-mode-desc">Every single cell</div>
+          </div>
+          <div class="win-mode-card" data-mode="custom">
+            <div class="win-mode-icon">🖊️</div>
+            <div class="win-mode-name">Custom</div>
+            <div class="win-mode-desc">Draw your own pattern</div>
+          </div>
+        </div>
+        <div id="custom-pattern-editor" style="display:none; margin-top:1.5rem;">
+          <p class="section-desc">Click cells to toggle them. Highlighted cells must be stamped to win.</p>
+          <div class="bingo-header-row" style="max-width:300px;">
+            <span class="bingo-letter b">B</span><span class="bingo-letter i">I</span>
+            <span class="bingo-letter n">N</span><span class="bingo-letter g">G</span>
+            <span class="bingo-letter o">O</span>
+          </div>
+          <div id="custom-pattern-grid" class="bingo-card" style="max-width:300px;"></div>
+        </div>
+        <button class="btn btn-primary" id="save-win-mode-btn" style="margin-top:1rem;">💾 Save Win Condition</button>
       </section>
 
       <!-- Reset Stamps -->
@@ -166,6 +208,7 @@
     </div>
   </div>
 
+  <div id="toast-container" aria-live="polite"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.99.1/dist/umd/supabase.js" integrity="sha384-8XssUxtqPx0hPSfYMU/HY5Heb2jR2yhWxwJGP67o6UoJUfeQNiEVxgQ63sSq6w/k" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js" integrity="sha384-bFS5CG904xYIgxBcrDF4KFNXuM7KeSGsSvS/QTaDqMTEdbaaxjg2Y2TSU3Ygs7wG" crossorigin="anonymous"></script>
   <script src="app.js"></script>

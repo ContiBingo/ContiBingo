@@ -25,6 +25,9 @@ let adminPlayers = [];
 let adminWinners = [];
 let adminCalledNumbers = [];
 
+let winMode = 'classic';
+let customPattern = Array(25).fill(false);
+
 // ============================================================
 // Utilities
 // ============================================================
@@ -146,6 +149,12 @@ function syncThemePickers(dbTheme) {
 // Supabase Data Operations
 // ============================================================
 async function loadState() {
+  let settingsRes = { data: null, error: null };
+  try {
+    settingsRes = await db.from('game_settings').select('win_mode, custom_pattern').eq('id', 1).single();
+  } catch(e) {
+    console.warn('game_settings table not found, using classic mode');
+  }
   const [numbersRes, themeRes, playersRes, winnersRes, resetRes] = await Promise.all([
     db.from('called_numbers').select('number').order('created_at'),
     db.from('theme').select('*').eq('id', 1).single(),
@@ -164,6 +173,8 @@ async function loadState() {
     players: playersRes.data || [],
     winners: (winnersRes.data || []).map(r => r.name),
     stampResetVersion: (resetRes.data || {}).version || 0,
+    winMode: (settingsRes.data && settingsRes.data.win_mode) || 'classic',
+    customPattern: (settingsRes.data && settingsRes.data.custom_pattern) || Array(25).fill(false),
   };
 }
 
@@ -208,20 +219,45 @@ async function adminSetTheme(theme) {
   }).eq('id', 1);
 }
 
+async function adminSaveWinMode(mode, pattern) {
+  await db.from('game_settings').upsert({
+    id: 1,
+    win_mode: mode,
+    custom_pattern: pattern,
+  }, { onConflict: 'id' });
+}
+
 // ============================================================
 // Bingo Win Detection
 // ============================================================
-function checkBingo(card, stamps) {
+function checkBingo(card, stamps, mode, pattern) {
+  mode = mode || winMode;
+  pattern = pattern || customPattern;
   const stamped = new Set(stamps);
-  // rows
+  const flat = card.flat();
+
+  if (mode === 'blackout') {
+    return flat.every(n => n === 0 || stamped.has(n));
+  }
+  if (mode === 'x') {
+    const diag1 = [0,1,2,3,4].every(i => flat[i*5+i] === 0 || stamped.has(flat[i*5+i]));
+    const diag2 = [0,1,2,3,4].every(i => flat[i*5+(4-i)] === 0 || stamped.has(flat[i*5+(4-i)]));
+    return diag1 && diag2;
+  }
+  if (mode === 'custom') {
+    return pattern.every((active, idx) => {
+      if (!active) return true;
+      const n = flat[idx];
+      return n === 0 || stamped.has(n);
+    });
+  }
+  // classic: any row, col, or either diagonal
   for (let r = 0; r < 5; r++) {
     if (card[r].every(n => n === 0 || stamped.has(n))) return true;
   }
-  // cols
   for (let c = 0; c < 5; c++) {
     if (card.map(row => row[c]).every(n => n === 0 || stamped.has(n))) return true;
   }
-  // diagonals
   if ([0,1,2,3,4].every(i => card[i][i] === 0 || stamped.has(card[i][i]))) return true;
   if ([0,1,2,3,4].every(i => card[i][4-i] === 0 || stamped.has(card[i][4-i]))) return true;
   return false;
@@ -346,6 +382,8 @@ async function showPlayerView(name) {
   const state = await loadState();
   calledNumbers = state.calledNumbers;
   currentStampResetVersion = state.stampResetVersion;
+  winMode = state.winMode;
+  customPattern = state.customPattern;
   if (state.theme) applyThemeFromDB(state.theme);
 
   // Handle stamp reset
@@ -359,6 +397,7 @@ async function showPlayerView(name) {
   const card = generateCard(name);
   rerenderCard(card, stamps);
   updateCalledNumbersDisplay(calledNumbers, 'called-numbers-display');
+  updateWinModeDisplay();
 
   subscribeToRealtime(card);
 }
@@ -373,6 +412,8 @@ async function showAdminView() {
   adminPlayers = state.players;
   adminWinners = state.winners;
   adminCalledNumbers = state.calledNumbers;
+  winMode = state.winMode;
+  customPattern = state.customPattern;
   if (state.theme) {
     applyThemeFromDB(state.theme);
     syncThemePickers(state.theme);
@@ -380,6 +421,7 @@ async function showAdminView() {
   updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
   renderWinners(state.winners);
   renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+  initWinModeSelector();
 
   subscribeToRealtimeAdmin();
 }
@@ -410,9 +452,11 @@ function renderPlayerList(players, winners, nums) {
     return;
   }
   filtered.forEach(p => {
+    const isWinner = winnerSet.has(p.name.toLowerCase());
     const item = document.createElement('div');
-    item.className = 'player-item' + (winnerSet.has(p.name.toLowerCase()) ? ' bingo-winner' : '');
-    item.textContent = (winnerSet.has(p.name.toLowerCase()) ? '🏆 ' : '') + p.name;
+    item.className = 'player-item' + (isWinner ? ' bingo-winner' : '');
+    const initials = p.name.split(' ').slice(0,2).map(w => w.charAt(0)).join('').toUpperCase();
+    item.innerHTML = `<span class="player-avatar">${initials}</span><span class="player-name">${(isWinner ? '🏆 ' : '') + p.name}</span>`;
     item.addEventListener('click', () => showPlayerCardModal(p.name, p.stamps || [], nums));
     list.appendChild(item);
   });
@@ -487,6 +531,128 @@ function showWinOverlay(name) {
 }
 
 // ============================================================
+// Win Mode Display
+// ============================================================
+function updateWinModeDisplay() {
+  const el = document.getElementById('win-mode-display');
+  if (!el) return;
+  const labels = {
+    classic: '🎯 Classic (Lines)',
+    x: '❌ X Pattern',
+    blackout: '⬛ Blackout',
+    custom: '🖊️ Custom Pattern',
+  };
+  el.textContent = labels[winMode] || labels.classic;
+}
+
+function getWinPatternCells() {
+  if (winMode === 'blackout') return Array.from({length:25}, (_, i) => i);
+  if (winMode === 'x') return [0,6,12,18,24, 4,8,12,16,20];
+  if (winMode === 'custom') return customPattern.map((v, i) => v ? i : null).filter(i => i !== null);
+  return null;
+}
+
+// ============================================================
+// Admin — Call Random Number
+// ============================================================
+async function adminCallRandom() {
+  const remaining = [];
+  for (let i = 1; i <= 75; i++) {
+    if (!calledNumbers.includes(i)) remaining.push(i);
+  }
+  if (remaining.length === 0) {
+    alert('All 75 numbers have been called!');
+    return;
+  }
+  const pick = remaining[Math.floor(Math.random() * remaining.length)];
+  await adminCallNumbers([pick]);
+  const state = await loadState();
+  calledNumbers = state.calledNumbers;
+  adminCalledNumbers = calledNumbers;
+  updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
+  showCalledNumberToast(pick);
+}
+
+function showCalledNumberToast(num) {
+  const col = getColumnClass(num);
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'called-number-toast';
+  toast.innerHTML = `<span class="toast-label">Called!</span><span class="toast-number badge-${col}">${num}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => toast.classList.add('toast-show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('toast-show');
+    setTimeout(() => toast.remove(), 400);
+  }, 3000);
+}
+
+function showSaveToast(message) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'called-number-toast';
+  toast.innerHTML = `<span class="toast-label" style="font-size:1rem;opacity:1;">${message}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => toast.classList.add('toast-show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('toast-show');
+    setTimeout(() => toast.remove(), 400);
+  }, 2500);
+}
+
+// ============================================================
+// Admin — Win Mode Selector
+// ============================================================
+function initWinModeSelector() {
+  const cards = document.querySelectorAll('#win-mode-selector .win-mode-card');
+  cards.forEach(card => {
+    card.addEventListener('click', () => {
+      cards.forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      winMode = card.dataset.mode;
+      const editor = document.getElementById('custom-pattern-editor');
+      if (editor) editor.style.display = winMode === 'custom' ? 'block' : 'none';
+    });
+  });
+
+  // Set active card based on current winMode
+  cards.forEach(card => {
+    card.classList.toggle('active', card.dataset.mode === winMode);
+  });
+  const editor = document.getElementById('custom-pattern-editor');
+  if (editor) editor.style.display = winMode === 'custom' ? 'block' : 'none';
+
+  renderCustomPatternGrid();
+}
+
+function renderCustomPatternGrid() {
+  const grid = document.getElementById('custom-pattern-grid');
+  if (!grid) return;
+  const cols = ['B','I','N','G','O'];
+  grid.innerHTML = '';
+  for (let i = 0; i < 25; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'bingo-cell pattern-cell' + (customPattern[i] ? ' pattern-active' : '');
+    const row = Math.floor(i / 5);
+    const col = i % 5;
+    const isFree = (row === 2 && col === 2);
+    if (isFree) {
+      cell.classList.add('free');
+      cell.innerHTML = '<span class="cell-number">FREE</span>';
+    } else {
+      cell.innerHTML = `<span class="cell-number">${cols[col]}${row + 1}</span>`;
+      cell.addEventListener('click', () => {
+        customPattern[i] = !customPattern[i];
+        cell.classList.toggle('pattern-active', customPattern[i]);
+      });
+    }
+    grid.appendChild(cell);
+  }
+}
+
+// ============================================================
 // Realtime Subscriptions
 // ============================================================
 function subscribeToRealtime(card) {
@@ -518,6 +684,14 @@ function subscribeToRealtime(card) {
       }
     })
     .subscribe();
+
+  db.channel('game_settings_ch')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_settings' }, (payload) => {
+      winMode = payload.new.win_mode || 'classic';
+      customPattern = payload.new.custom_pattern || Array(25).fill(false);
+      updateWinModeDisplay();
+    })
+    .subscribe();
 }
 
 function subscribeToRealtimeAdmin() {
@@ -546,6 +720,13 @@ function subscribeToRealtimeAdmin() {
   db.channel('players_admin_ch')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, async () => {
       await refreshPlayerMonitor();
+    })
+    .subscribe();
+
+  db.channel('game_settings_admin_ch')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_settings' }, (payload) => {
+      winMode = payload.new.win_mode || 'classic';
+      customPattern = payload.new.custom_pattern || Array(25).fill(false);
     })
     .subscribe();
 }
@@ -627,6 +808,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  // Call random number
+  document.getElementById('call-random-btn').addEventListener('click', async () => {
+    await adminCallRandom();
+  });
+
   // Call single number
   document.getElementById('call-number-btn').addEventListener('click', async () => {
     const val = parseInt(document.getElementById('single-number-input').value, 10);
@@ -675,6 +861,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Refresh players button
   document.getElementById('refresh-players-btn').addEventListener('click', async () => {
     await refreshPlayerMonitor();
+  });
+
+  // Save win mode
+  document.getElementById('save-win-mode-btn').addEventListener('click', async () => {
+    await adminSaveWinMode(winMode, customPattern);
+    showSaveToast('✓ Win condition saved!');
   });
 
   // Close player card modal
