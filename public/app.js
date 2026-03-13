@@ -31,6 +31,14 @@ let customPattern = Array(25).fill(false);
 // ============================================================
 // Utilities
 // ============================================================
+function hexToRgba(hex, alpha) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function range(start, end) {
   const arr = [];
   for (let i = start; i <= end; i++) arr.push(i);
@@ -122,11 +130,26 @@ function applyThemeFromDB(dbTheme) {
   if (!dbTheme) return;
   const root = document.documentElement;
   if (dbTheme.bg_color)     root.style.setProperty('--bg-color',     dbTheme.bg_color);
-  if (dbTheme.card_color)   root.style.setProperty('--card-color',   dbTheme.card_color);
+  if (dbTheme.card_color) {
+    root.style.setProperty('--card-color', dbTheme.card_color);
+    const glassBg = hexToRgba(dbTheme.card_color, 0.75);
+    if (glassBg) root.style.setProperty('--glass-bg', glassBg);
+  }
   if (dbTheme.stamp_color)  root.style.setProperty('--stamp-color',  dbTheme.stamp_color);
-  if (dbTheme.header_color) root.style.setProperty('--header-color', dbTheme.header_color);
+  if (dbTheme.header_color) {
+    root.style.setProperty('--header-color', dbTheme.header_color);
+    const headerBg = hexToRgba(dbTheme.header_color, 0.85);
+    if (headerBg) root.style.setProperty('--header-bg', headerBg);
+  }
   if (dbTheme.text_color)   root.style.setProperty('--text-color',   dbTheme.text_color);
-  if (dbTheme.accent_color) root.style.setProperty('--accent-color', dbTheme.accent_color);
+  if (dbTheme.accent_color) {
+    root.style.setProperty('--accent-color', dbTheme.accent_color);
+    const rgba = hexToRgba(dbTheme.accent_color, 1);
+    if (rgba) {
+      const rgb = rgba.match(/\d+/g);
+      if (rgb) root.style.setProperty('--accent-rgb', `${rgb[0]},${rgb[1]},${rgb[2]}`);
+    }
+  }
   // Background image
   if (dbTheme.bg_image) {
     document.body.style.backgroundImage = `url("${dbTheme.bg_image}")`;
@@ -173,7 +196,7 @@ async function loadState() {
   const [numbersRes, themeRes, playersRes, winnersRes, resetRes] = await Promise.all([
     db.from('called_numbers').select('number').order('created_at'),
     db.from('theme').select('*').eq('id', 1).single(),
-    db.from('players').select('name, stamps').order('created_at'),
+    db.from('players').select('name, stamps, created_at').order('created_at'),
     db.from('winners').select('name').order('created_at'),
     db.from('stamp_resets').select('version').eq('id', 1).single(),
   ]);
@@ -488,6 +511,12 @@ async function adminDeletePlayer(nameLower) {
 function renderPlayerList(players, winners, nums) {
   const list = document.getElementById('player-list');
   if (!list) return;
+
+  if (players == null) {
+    list.innerHTML = '<p style="color:#ff6b6b;font-size:0.9rem;">⚠️ Failed to load players. Check console.</p>';
+    return;
+  }
+
   const winnerSet = new Set((winners || []).map(w => w.toLowerCase()));
   list.innerHTML = '';
 
@@ -530,6 +559,14 @@ function renderPlayerList(players, winners, nums) {
     header.appendChild(delBtn);
     item.appendChild(header);
 
+    // Joined timestamp
+    if (p.created_at) {
+      const ts = document.createElement('div');
+      ts.style.cssText = 'font-size:0.72rem;opacity:0.45;margin-top:-0.2rem;';
+      ts.textContent = `Joined ${new Date(p.created_at).toLocaleString()}`;
+      item.appendChild(ts);
+    }
+
     // Mini card preview
     item.appendChild(renderMiniCard(p.name, p.stamps || [], nums || []));
 
@@ -538,12 +575,28 @@ function renderPlayerList(players, winners, nums) {
 }
 
 async function refreshPlayerMonitor() {
-  const state = await loadState();
-  adminPlayers = state.players;
-  adminWinners = state.winners;
-  adminCalledNumbers = state.calledNumbers;
-  renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
-  renderWinners(adminWinners);
+  const refreshBtn = document.getElementById('refresh-players-btn');
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '⏳ Refreshing…';
+  }
+  try {
+    const state = await loadState();
+    adminPlayers = state.players;
+    adminWinners = state.winners;
+    adminCalledNumbers = state.calledNumbers;
+    renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+    renderWinners(adminWinners);
+  } catch(e) {
+    console.error('refreshPlayerMonitor error:', e);
+    const list = document.getElementById('player-list');
+    if (list) list.innerHTML = '<p style="color:#ff6b6b;font-size:0.9rem;">⚠️ Failed to load players. Check console.</p>';
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '🔄 Refresh';
+    }
+  }
 }
 
 function renderWinners(winners) {
