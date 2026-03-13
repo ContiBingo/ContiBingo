@@ -135,7 +135,14 @@ function applyThemeFromDB(dbTheme) {
     const glassBg = hexToRgba(dbTheme.card_color, 0.75);
     if (glassBg) root.style.setProperty('--glass-bg', glassBg);
   }
-  if (dbTheme.stamp_color)  root.style.setProperty('--stamp-color',  dbTheme.stamp_color);
+  if (dbTheme.stamp_color) {
+    root.style.setProperty('--stamp-color', dbTheme.stamp_color);
+    const stampRgba = hexToRgba(dbTheme.stamp_color, 1);
+    if (stampRgba) {
+      const stampRgb = stampRgba.match(/\d+/g);
+      if (stampRgb) root.style.setProperty('--stamp-rgb', `${stampRgb[0]},${stampRgb[1]},${stampRgb[2]}`);
+    }
+  }
   if (dbTheme.header_color) {
     root.style.setProperty('--header-color', dbTheme.header_color);
     const headerBg = hexToRgba(dbTheme.header_color, 0.85);
@@ -202,13 +209,16 @@ async function loadState() {
   ]);
   if (numbersRes.error) console.error('loadState: called_numbers error', numbersRes.error);
   if (themeRes.error) console.error('loadState: theme error', themeRes.error);
-  if (playersRes.error) console.error('loadState: players error', playersRes.error);
+  if (playersRes.error) {
+    console.error('loadState: players error', JSON.stringify(playersRes.error));
+  }
   if (winnersRes.error) console.error('loadState: winners error', winnersRes.error);
   if (resetRes.error) console.error('loadState: stamp_resets error', resetRes.error);
   return {
     calledNumbers: (numbersRes.data || []).map(r => r.number),
     theme: themeRes.data || null,
-    players: playersRes.data || [],
+    players: playersRes.error ? null : (playersRes.data || []),
+    playersError: playersRes.error || null,
     winners: (winnersRes.data || []).map(r => r.name),
     stampResetVersion: (resetRes.data || {}).version || 0,
     winMode: (settingsRes.data && settingsRes.data.win_mode) || 'classic',
@@ -465,6 +475,9 @@ async function showAdminView() {
   updateCalledNumbersDisplay(calledNumbers, 'admin-called-numbers');
   renderWinners(state.winners);
   renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+  if (state.playersError) {
+    showPlayerListError(state.playersError);
+  }
   initWinModeSelector();
 
   subscribeToRealtimeAdmin();
@@ -574,6 +587,16 @@ function renderPlayerList(players, winners, nums) {
   });
 }
 
+function showPlayerListError(error) {
+  const list = document.getElementById('player-list');
+  if (!list) return;
+  const msg = document.createElement('p');
+  msg.style.cssText = 'color:#ff6b6b;font-size:0.85rem;';
+  msg.textContent = `⚠️ DB error: ${error.message || JSON.stringify(error)}`;
+  list.innerHTML = '';
+  list.appendChild(msg);
+}
+
 async function refreshPlayerMonitor() {
   const refreshBtn = document.getElementById('refresh-players-btn');
   if (refreshBtn) {
@@ -586,11 +609,20 @@ async function refreshPlayerMonitor() {
     adminWinners = state.winners;
     adminCalledNumbers = state.calledNumbers;
     renderPlayerList(adminPlayers, adminWinners, adminCalledNumbers);
+    if (state.playersError) {
+      showPlayerListError(state.playersError);
+    }
     renderWinners(adminWinners);
   } catch(e) {
     console.error('refreshPlayerMonitor error:', e);
     const list = document.getElementById('player-list');
-    if (list) list.innerHTML = '<p style="color:#ff6b6b;font-size:0.9rem;">⚠️ Failed to load players. Check console.</p>';
+    if (list) {
+      const msg = document.createElement('p');
+      msg.style.cssText = 'color:#ff6b6b;font-size:0.9rem;';
+      msg.textContent = '⚠️ Failed to load players. Check console.';
+      list.innerHTML = '';
+      list.appendChild(msg);
+    }
   } finally {
     if (refreshBtn) {
       refreshBtn.disabled = false;
