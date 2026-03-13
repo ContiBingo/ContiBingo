@@ -127,6 +127,15 @@ function applyThemeFromDB(dbTheme) {
   if (dbTheme.header_color) root.style.setProperty('--header-color', dbTheme.header_color);
   if (dbTheme.text_color)   root.style.setProperty('--text-color',   dbTheme.text_color);
   if (dbTheme.accent_color) root.style.setProperty('--accent-color', dbTheme.accent_color);
+  // Background image
+  if (dbTheme.bg_image) {
+    document.body.style.backgroundImage = `url("${dbTheme.bg_image}")`;
+    document.body.style.backgroundSize = 'cover';
+    document.body.style.backgroundPosition = 'center';
+    document.body.style.backgroundAttachment = 'fixed';
+  } else if (dbTheme.bg_image === null || dbTheme.bg_image === '') {
+    document.body.style.backgroundImage = '';
+  }
 }
 
 function syncThemePickers(dbTheme) {
@@ -143,6 +152,12 @@ function syncThemePickers(dbTheme) {
     const el = document.getElementById(id);
     if (el && val) el.value = val;
   });
+  // Show current bg image if set
+  const statusEl = document.getElementById('bg-upload-status');
+  if (statusEl && dbTheme.bg_image) {
+    statusEl.style.color = 'rgba(255,255,255,0.6)';
+    statusEl.textContent = '✓ Background image is active.';
+  }
 }
 
 // ============================================================
@@ -217,6 +232,10 @@ async function adminSetTheme(theme) {
     text_color:   theme.textColor,
     accent_color: theme.accentColor,
   }).eq('id', 1);
+}
+
+async function adminSetBgImage(url) {
+  await db.from('theme').update({ bg_image: url }).eq('id', 1);
 }
 
 async function adminSaveWinMode(mode, pattern) {
@@ -909,6 +928,66 @@ document.addEventListener('DOMContentLoaded', async () => {
       stamp_color: theme.stampColor, header_color: theme.headerColor,
       text_color: theme.textColor, accent_color: theme.accentColor,
     });
+  });
+
+  // Background image — show filename on file select
+  document.getElementById('bg-image-input').addEventListener('change', () => {
+    const file = document.getElementById('bg-image-input').files[0];
+    const label = document.getElementById('bg-image-filename');
+    label.textContent = file ? file.name : 'No file chosen';
+  });
+
+  // Trigger hidden file input when the styled button span is clicked
+  document.getElementById('bg-image-choose-btn').addEventListener('click', () => {
+    document.getElementById('bg-image-input').click();
+  });
+
+  // Upload & apply background image
+  document.getElementById('upload-bg-btn').addEventListener('click', async () => {
+    const file = document.getElementById('bg-image-input').files[0];
+    const statusEl = document.getElementById('bg-upload-status');
+    if (!file) {
+      statusEl.style.color = '#e94560';
+      statusEl.textContent = 'Please choose an image file first.';
+      return;
+    }
+    statusEl.style.color = 'rgba(255,255,255,0.6)';
+    statusEl.textContent = '⏳ Uploading…';
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    const allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'];
+    if (!allowedExts.includes(ext)) {
+      statusEl.style.color = '#e94560';
+      statusEl.textContent = 'Invalid file type. Please upload a JPG, PNG, GIF, WebP, or AVIF image.';
+      return;
+    }
+    const path = `bg_${Date.now()}.${ext}`;
+    const { data, error } = await db.storage
+      .from('backgrounds')
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (error) {
+      statusEl.style.color = '#e94560';
+      statusEl.textContent = `Upload failed: ${error.message}`;
+      return;
+    }
+
+    const { data: { publicUrl } } = db.storage.from('backgrounds').getPublicUrl(data.path);
+    await adminSetBgImage(publicUrl);
+    applyThemeFromDB({ bg_image: publicUrl });
+    statusEl.style.color = '#4ade80';
+    statusEl.textContent = '✓ Background image applied!';
+    document.getElementById('bg-image-input').value = '';
+    document.getElementById('bg-image-filename').textContent = 'No file chosen';
+  });
+
+  // Remove background image
+  document.getElementById('remove-bg-btn').addEventListener('click', async () => {
+    const statusEl = document.getElementById('bg-upload-status');
+    await adminSetBgImage(null);
+    document.body.style.backgroundImage = '';
+    statusEl.style.color = 'rgba(255,255,255,0.6)';
+    statusEl.textContent = 'Background image removed.';
   });
 
   // Call random number

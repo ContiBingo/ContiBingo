@@ -116,6 +116,22 @@
           <label class="color-label">Accent<input type="color" id="theme-accent" value="#e94560" /></label>
         </div>
         <button class="btn btn-primary" id="apply-theme-btn">Apply Theme</button>
+
+        <!-- Background Image -->
+        <div class="bg-image-upload" style="margin-top:1.25rem;">
+          <p class="section-subtitle" style="margin-top:0;">🖼️ Background Image</p>
+          <p class="section-desc">Upload an image to use as the page background. Replaces the background colour for all players.</p>
+          <div class="input-row" style="align-items:center;gap:0.75rem;flex-wrap:wrap;">
+            <label class="bg-upload-label">
+              <input type="file" id="bg-image-input" accept="image/*" style="display:none;" />
+              <span class="btn btn-secondary" id="bg-image-choose-btn">📂 Choose Image</span>
+            </label>
+            <span id="bg-image-filename" style="font-size:0.85rem;opacity:0.65;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No file chosen</span>
+            <button class="btn btn-primary" id="upload-bg-btn">⬆️ Upload &amp; Apply</button>
+            <button class="btn btn-secondary" id="remove-bg-btn">✕ Remove Image</button>
+          </div>
+          <div id="bg-upload-status" style="font-size:0.82rem;margin-top:0.5rem;min-height:1.2em;"></div>
+        </div>
       </section>
 
       <!-- Section B: Number Caller -->

@@ -29,7 +29,8 @@ create table if not exists theme (
   stamp_color text default '#e94560',
   header_color text default '#0f3460',
   text_color text default '#ffffff',
-  accent_color text default '#e94560'
+  accent_color text default '#e94560',
+  bg_image text default null
 );
 insert into theme (id) values (1) on conflict do nothing;
 
@@ -71,3 +72,7 @@ alter publication supabase_realtime add table winners;
 alter publication supabase_realtime add table theme;
 alter publication supabase_realtime add table stamp_resets;
 alter publication supabase_realtime add table game_settings;
+
+-- Migration: add bg_image column to theme table
+-- Run this in the Supabase SQL Editor if upgrading an existing project:
+alter table theme add column if not exists bg_image text default null;
