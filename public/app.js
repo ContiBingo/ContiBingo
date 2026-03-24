@@ -27,6 +27,7 @@ let adminCalledNumbers = [];
 
 let winMode = 'classic';
 let customPattern = Array(25).fill(false);
+let autoHighlight = true;
 
 // ============================================================
 // Utilities
@@ -196,7 +197,7 @@ function syncThemePickers(dbTheme) {
 async function loadState() {
   let settingsRes = { data: null, error: null };
   try {
-    settingsRes = await db.from('game_settings').select('win_mode, custom_pattern').eq('id', 1).single();
+    settingsRes = await db.from('game_settings').select('win_mode, custom_pattern, auto_highlight').eq('id', 1).single();
   } catch(e) {
     console.warn('game_settings table not found, using classic mode');
   }
@@ -223,6 +224,7 @@ async function loadState() {
     stampResetVersion: (resetRes.data || {}).version || 0,
     winMode: (settingsRes.data && settingsRes.data.win_mode) || 'classic',
     customPattern: (settingsRes.data && settingsRes.data.custom_pattern) || Array(25).fill(false),
+    autoHighlight: (settingsRes.data && settingsRes.data.auto_highlight != null) ? settingsRes.data.auto_highlight : true,
   };
 }
 
@@ -271,10 +273,11 @@ async function adminSetBgImage(url) {
   await db.from('theme').update({ bg_image: url }).eq('id', 1);
 }
 
-async function adminSaveWinMode(mode, pattern) {
+async function adminSaveWinMode(mode, pattern, highlight) {
   await db.from('game_settings').update({
     win_mode: mode,
     custom_pattern: pattern,
+    auto_highlight: highlight,
   }).eq('id', 1);
 }
 
@@ -349,7 +352,7 @@ function renderCard(container, card, stamps, calledNums, clickable) {
         if (stamped.has(num)) cell.classList.add('stamped');
         if (called.has(num)) {
           cell.classList.add('callable');
-          if (!stamped.has(num)) cell.classList.add('called-highlight');
+          if (!stamped.has(num) && autoHighlight) cell.classList.add('called-highlight');
           if (clickable) {
             cell.addEventListener('click', () => onCellClick(num, card));
           }
@@ -438,9 +441,8 @@ async function showPlayerView(name) {
   currentStampResetVersion = state.stampResetVersion;
   winMode = state.winMode;
   customPattern = state.customPattern;
+  autoHighlight = state.autoHighlight ?? true;
   if (state.theme) applyThemeFromDB(state.theme);
-
-  // Handle stamp reset
   const localVersion = getLocalResetVersion();
   if (state.stampResetVersion > localVersion) {
     clearLocalStamps();
@@ -468,6 +470,7 @@ async function showAdminView() {
   adminCalledNumbers = state.calledNumbers;
   winMode = state.winMode;
   customPattern = state.customPattern;
+  autoHighlight = state.autoHighlight ?? true;
   if (state.theme) {
     applyThemeFromDB(state.theme);
     syncThemePickers(state.theme);
@@ -479,6 +482,8 @@ async function showAdminView() {
     showPlayerListError(state.playersError);
   }
   initWinModeSelector();
+  const highlightToggle = document.getElementById('auto-highlight-toggle');
+  if (highlightToggle) highlightToggle.checked = autoHighlight;
 
   subscribeToRealtimeAdmin();
 }
@@ -870,7 +875,10 @@ function subscribeToRealtime(card) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'game_settings' }, (payload) => {
       winMode = payload.new.win_mode || 'classic';
       customPattern = payload.new.custom_pattern || Array(25).fill(false);
+      autoHighlight = payload.new.auto_highlight ?? true;
       updateWinModeDisplay();
+      const stamps = getStamps(playerName);
+      rerenderCard(card, stamps);
     })
     .subscribe();
 
@@ -1127,7 +1135,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Save win mode
   document.getElementById('save-win-mode-btn').addEventListener('click', async () => {
-    await adminSaveWinMode(winMode, customPattern);
+    const highlightToggle = document.getElementById('auto-highlight-toggle');
+    const highlight = highlightToggle ? highlightToggle.checked : true;
+    autoHighlight = highlight;
+    await adminSaveWinMode(winMode, customPattern, highlight);
     showSaveToast('✓ Win condition saved!');
   });
 
