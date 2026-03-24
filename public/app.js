@@ -385,6 +385,7 @@ function rerenderCard(card, stamps) {
   const container = document.getElementById('bingo-card');
   if (!container) return;
   renderCard(container, card, stamps, calledNumbers, true);
+  container.classList.toggle('highlight-off', !autoHighlight);
 }
 
 // ============================================================

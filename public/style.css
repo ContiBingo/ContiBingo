@@ -832,6 +832,20 @@ textarea.modal-input { resize: vertical; min-height: 60px; }
   to   { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.6), 0 4px 18px rgba(var(--accent-rgb), 0.4); }
 }
 
+/* ---- HIGHLIGHT OFF: callable-but-unstamped cells look like uncallable ---- */
+#bingo-card.highlight-off .bingo-cell.callable:not(.stamped) {
+  opacity: 0.35;
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.08);
+  box-shadow: none;
+  cursor: default;
+}
+#bingo-card.highlight-off .bingo-cell.callable:not(.stamped):hover {
+  transform: none;
+  border-color: rgba(255,255,255,0.08);
+  box-shadow: none;
+}
+
 /* ---- RESPONSIVE ---- */
 @media (max-width: 600px) {
   .player-main { padding: 1rem; }
