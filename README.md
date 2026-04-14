@@ -16,7 +16,7 @@ Each player's bingo card is generated deterministically from their name using th
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 public/
